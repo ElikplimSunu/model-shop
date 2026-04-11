@@ -1,4 +1,4 @@
-# 🌟 NVIDIA Trellis 3D Model Generator
+# 3D Model Generator
 
 A cutting-edge web application built with **Next.js 15** and **React Three Fiber** that leverages NVIDIA's **Trellis NIM** to generate high-fidelity 3D models (GLB) from simple images or text descriptions.
 
