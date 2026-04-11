@@ -46,6 +46,34 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
   const [textError, setTextError] = useState<string | null>(null);
 
   const MAX_TEXT_LENGTH = 500;
+  
+  const EXAMPLE_PROMPTS = [
+    {
+      category: 'Architecture',
+      text: 'Brutalist concrete observation tower with sharp geometric angles and recessed glass windows.',
+      label: 'Brutalist Tower'
+    },
+    {
+      category: 'Architecture',
+      text: 'Traditional Japanese pagoda with curved crimson roofs and ornate golden finials.',
+      label: 'Japanese Pagoda'
+    },
+    {
+      category: 'Interior',
+      text: 'Modern minimalist lounge chair with curved wooden armrests and brushed aluminum legs.',
+      label: 'Modern Chair'
+    },
+    {
+      category: 'Nature',
+      text: 'Delicate bonsai tree in a smooth white ceramic pot with gnarled dark bark.',
+      label: 'Bonsai Tree'
+    },
+    {
+      category: 'Fantasy',
+      text: 'Cute baby dragon with iridescent green scales sitting on a jagged obsidian rock.',
+      label: 'Baby Dragon'
+    }
+  ];
 
   const handleModeChange = (newMode: InputMode) => {
     if (!isLoading) {
@@ -355,6 +383,25 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
               {/* Character Count */}
               <div className="mt-2 text-sm text-right text-gray-500 dark:text-gray-400">
                 {textInput.length} / {MAX_TEXT_LENGTH} characters
+              </div>
+            </div>
+
+            {/* Example Prompts Section */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                Try Example Prompts
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {EXAMPLE_PROMPTS.map((example, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setTextInput(example.text)}
+                    disabled={isLoading}
+                    className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 text-xs font-medium rounded-full border border-zinc-200 dark:border-zinc-700 transition-colors"
+                  >
+                    {example.label}
+                  </button>
+                ))}
               </div>
             </div>
 
