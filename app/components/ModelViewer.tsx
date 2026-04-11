@@ -1,10 +1,11 @@
 'use client';
 
-import { Canvas } from '@react-three/fiber';
-import { useGLTF, OrbitControls } from '@react-three/drei';
+import { Canvas, useLoader, useThree } from '@react-three/fiber';
+import { OrbitControls } from '@react-three/drei';
 import { ModelViewerProps } from '@/types/3d-model';
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState, Component, ReactNode } from 'react';
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 /**
  * Performance Monitor Hook
@@ -17,7 +18,7 @@ function usePerformanceMonitor() {
   const [showWarning, setShowWarning] = useState(false);
   const frameTimesRef = useRef<number[]>([]);
   const lastFrameTimeRef = useRef<number>(performance.now());
-  const animationFrameRef = useRef<number>();
+  const animationFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     const measureFPS = () => {
@@ -57,64 +58,102 @@ function usePerformanceMonitor() {
 }
 
 /**
+ * Error Boundary for Three.js Canvas content
+ * 
+ * Catches errors thrown by useLoader/Suspense inside the R3F Canvas
+ * and reports them to the parent via onError callback.
+ */
+class CanvasErrorBoundary extends Component<
+  { children: ReactNode; onError?: (error: Error) => void },
+  { hasError: boolean }
+> {
+  constructor(props: { children: ReactNode; onError?: (error: Error) => void }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('CanvasErrorBoundary caught:', error);
+    if (this.props.onError) {
+      this.props.onError(error);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return null; // Render nothing inside the canvas on error
+    }
+    return this.props.children;
+  }
+}
+
+/**
  * Model Component
  * 
- * Loads and renders a GLB model using the useGLTF hook.
+ * Loads and renders a GLB model using useLoader with GLTFLoader directly.
+ * In drei v10, useGLTF's 4th arg is extendLoader (NOT an error callback),
+ * so we use useLoader directly for proper Suspense-based error handling.
  * Automatically fits the model within viewport boundaries.
  */
 function Model({ 
   url, 
-  onLoadError, 
   onLoadSuccess 
 }: { 
   url: string; 
-  onLoadError?: (error: Error) => void; 
   onLoadSuccess?: () => void; 
 }) {
   const groupRef = useRef<THREE.Group>(null);
-  const [hasError, setHasError] = useState(false);
+  const { camera } = useThree();
   
-  // Load GLB model using useGLTF hook with error handling
-  const gltf = useGLTF(url, undefined, undefined, (error) => {
-    console.error('Error loading GLB model:', error);
-    setHasError(true);
-    if (onLoadError) {
-      onLoadError(error instanceof Error ? error : new Error('Failed to load model'));
-    }
-  });
+  // Load GLB model using useLoader with GLTFLoader directly.
+  const gltf = useLoader(GLTFLoader, url);
 
-  // Fit model within viewport boundaries and call success callback
+  // Center the model at the origin and auto-fit the camera
   useEffect(() => {
-    if (gltf && gltf.scene && groupRef.current && !hasError) {
+    if (gltf && gltf.scene && groupRef.current) {
       try {
+        // Reset transforms before computing bounding box
+        groupRef.current.scale.setScalar(1);
+        groupRef.current.position.set(0, 0, 0);
+
         const box = new THREE.Box3().setFromObject(groupRef.current);
         const size = box.getSize(new THREE.Vector3());
         const center = box.getCenter(new THREE.Vector3());
         
-        // Calculate scale to fit model in viewport
+        // Center the model at the origin (no scaling needed — we move the camera instead)
+        groupRef.current.position.set(-center.x, -center.y, -center.z);
+
+        // Auto-fit camera to the model's bounding sphere
         const maxDim = Math.max(size.x, size.y, size.z);
-        const scale = maxDim > 0 ? 2 / maxDim : 1;
+        const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180);
+        // Distance so the model fills ~80% of the viewport
+        const cameraDistance = (maxDim / 2) / Math.tan(fov / 2) * 1.25;
         
-        // Apply scale and center the model
-        groupRef.current.scale.setScalar(scale);
-        groupRef.current.position.sub(center.multiplyScalar(scale));
+        // Position camera at an isometric-ish angle
+        const d = cameraDistance / Math.sqrt(3);
+        camera.position.set(d, d, d);
+        camera.lookAt(0, 0, 0);
+        camera.updateProjectionMatrix();
         
-        // Call success callback
+        console.log('Model fitted. Size:', size.x.toFixed(2), size.y.toFixed(2), size.z.toFixed(2), 'Camera distance:', cameraDistance.toFixed(2));
+        
         if (onLoadSuccess) {
           onLoadSuccess();
         }
       } catch (error) {
-        // If fitting fails, still call success but log the error
         console.warn('Failed to fit model in viewport:', error);
         if (onLoadSuccess) {
           onLoadSuccess();
         }
       }
     }
-  }, [gltf, onLoadSuccess, hasError]);
+  }, [gltf, onLoadSuccess, camera]);
 
-  // Don't render if there was an error
-  if (hasError || !gltf || !gltf.scene) {
+  if (!gltf || !gltf.scene) {
     return null;
   }
 
@@ -122,6 +161,18 @@ function Model({
     <group ref={groupRef}>
       <primitive object={gltf.scene} />
     </group>
+  );
+}
+
+/**
+ * Loading Fallback Component (rendered inside Canvas during Suspense)
+ */
+function LoadingIndicator() {
+  return (
+    <mesh>
+      <boxGeometry args={[0.5, 0.5, 0.5]} />
+      <meshStandardMaterial color="#666" wireframe />
+    </mesh>
   );
 }
 
@@ -142,7 +193,7 @@ export default function ModelViewer({
   const { fps, showWarning } = usePerformanceMonitor();
 
   // Default camera position and target
-  const defaultCameraPosition = new THREE.Vector3(5, 5, 5);
+  const defaultCameraPosition = new THREE.Vector3(3, 3, 3);
   const defaultTarget = new THREE.Vector3(0, 0, 0);
 
   /**
@@ -190,7 +241,7 @@ export default function ModelViewer({
   };
 
   return (
-    <div className="w-full h-full min-h-[400px] bg-gray-900 rounded-lg overflow-hidden relative">
+    <div className="w-full h-[400px] sm:h-[500px] bg-gray-900 rounded-lg overflow-hidden relative">
       {/* Performance warning banner */}
       {showWarning && (
         <div className="absolute top-4 left-4 z-10 bg-yellow-600 text-white px-4 py-2 rounded-md shadow-lg flex items-center gap-2">
@@ -245,20 +296,38 @@ export default function ModelViewer({
       </button>
 
       <Canvas
+        style={{ width: '100%', height: '100%' }}
         camera={{
-          position: [5, 5, 5],
-          fov: 50,
+          position: [3, 3, 3],
+          fov: 45,
         }}
         dpr={[1, 2]} // Adaptive pixel ratio for performance
         performance={{ min: 0.5 }} // Allow quality reduction if needed
       >
-        {/* Ambient light for overall scene illumination */}
-        <ambientLight intensity={0.5} />
+        {/* Hemisphere light for natural sky/ground ambient */}
+        <hemisphereLight
+          args={['#b1e1ff', '#b97a20', 0.6]}
+        />
         
-        {/* Directional light for shadows and depth */}
+        {/* Ambient light for baseline illumination */}
+        <ambientLight intensity={0.8} />
+        
+        {/* Key light - main directional light from upper-right */}
         <directionalLight 
-          intensity={1} 
-          position={[10, 10, 5]} 
+          intensity={1.5} 
+          position={[5, 8, 5]} 
+        />
+        
+        {/* Fill light - softer light from opposite side to reduce harsh shadows */}
+        <directionalLight 
+          intensity={0.6} 
+          position={[-5, 3, -3]} 
+        />
+        
+        {/* Rim light - back light for edge definition */}
+        <directionalLight 
+          intensity={0.4} 
+          position={[0, -2, -5]} 
         />
         
         {/* Interactive controls for rotation, zoom, and pan */}
@@ -266,8 +335,8 @@ export default function ModelViewer({
           ref={controlsRef}
           enableDamping={true}
           dampingFactor={0.05}
-          minDistance={2}
-          maxDistance={20}
+          minDistance={0.5}
+          maxDistance={30}
           mouseButtons={{
             LEFT: THREE.MOUSE.ROTATE,
             MIDDLE: THREE.MOUSE.DOLLY,
@@ -279,13 +348,16 @@ export default function ModelViewer({
           }}
         />
         
-        {/* Render GLB model when data is available */}
+        {/* Render GLB model with Suspense fallback and error boundary */}
         {modelData && (
-          <Model 
-            url={modelData} 
-            onLoadError={onLoadError}
-            onLoadSuccess={onLoadSuccess}
-          />
+          <CanvasErrorBoundary onError={onLoadError}>
+            <Suspense fallback={<LoadingIndicator />}>
+              <Model 
+                url={modelData} 
+                onLoadSuccess={onLoadSuccess}
+              />
+            </Suspense>
+          </CanvasErrorBoundary>
         )}
       </Canvas>
     </div>

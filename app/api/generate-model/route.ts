@@ -304,10 +304,14 @@ export async function POST(request: NextRequest) {
 
     // Requirement 6.1: Parse and return GLB model data from response
     let responseData;
+    let rawResponseText;
     try {
-      responseData = await trellisResponse.json();
+      rawResponseText = await trellisResponse.text();
+      console.log('Raw API response (first 500 chars):', rawResponseText.substring(0, 500));
+      responseData = JSON.parse(rawResponseText);
     } catch (parseError) {
       console.error('Failed to parse API response:', parseError);
+      console.error('Raw response was:', rawResponseText?.substring(0, 200));
       return NextResponse.json<GenerateModelResponse>(
         {
           success: false,
@@ -318,6 +322,20 @@ export async function POST(request: NextRequest) {
         },
         { status: 500 }
       );
+    }
+
+    // Diagnostic logging to understand the response structure
+    console.log('API response keys:', Object.keys(responseData));
+    if (responseData.artifacts) {
+      console.log('artifacts length:', responseData.artifacts.length);
+      if (responseData.artifacts[0]) {
+        console.log('artifacts[0] keys:', Object.keys(responseData.artifacts[0]));
+        console.log('artifacts[0].base64 length:', responseData.artifacts[0].base64?.length || 'N/A');
+        console.log('artifacts[0].base64 prefix:', responseData.artifacts[0].base64?.substring(0, 50) || 'N/A');
+      }
+    }
+    if (responseData.model) {
+      console.log('model keys:', Object.keys(responseData.model));
     }
 
     // Requirement 6.1: Extract and return the 3D model data
