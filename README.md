@@ -15,7 +15,7 @@ A description first becomes a picture (FLUX, hosted by NVIDIA), which you check 
 - **Inspect.** Turn and zoom, turntable, wireframe, reset view. The corner readout shows proportions, triangle count and file size, with the source photo pinned beside the model.
 - **Keep.** Download any result as `.glb`, open any `.glb` from your computer, and click back through every model made in the tab.
 - **Buildings from measurements.** The Buildings page turns walls, doors, windows and floor heights, typed as numbers in metres, into an exact 3D building at true size, with the dimensions on screen and a `.glb` download. No AI is involved, so nothing is guessed.
-- **Honest waiting.** A cold GPU takes 2.5 to 4.5 minutes. The page shows elapsed time against the usual window instead of a made-up progress bar.
+- **Honest waiting.** A cold GPU takes minutes: TRELLIS.2 Draft took 4:09 and 5:38 from cold in our runs through the app. The page shows elapsed time against the usual window instead of a made-up progress bar.
 
 The interface is laid out like an architect's drawing sheet (title block, crop marks, hatching, a scale bar), because the long-term goal is buildings: see [Roadmap](#roadmap).
 
