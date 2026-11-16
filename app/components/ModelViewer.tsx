@@ -13,14 +13,14 @@ type Controls = { target: THREE.Vector3; update(): void; saveState(): void };
 const SIDE = 2; // every model is scaled so its longest side is 2 units; the grid and camera are set for that
 
 const darkQuery = '(prefers-color-scheme: dark)';
-const useDark = () => useSyncExternalStore(
+export const useDark = () => useSyncExternalStore(
   (cb) => { const m = matchMedia(darkQuery); m.addEventListener('change', cb); return () => m.removeEventListener('change', cb); },
   () => matchMedia(darkQuery).matches,
   () => false,
 );
 
 /** Neutral studio lighting built locally (no HDR download), close to model-viewer's "neutral". */
-function Studio() {
+export function Studio() {
   const gl = useThree((s) => s.gl);
   const env = useMemo(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
