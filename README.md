@@ -13,6 +13,7 @@ A description first becomes a picture (FLUX, hosted by NVIDIA), which you check 
 - **Draft or High.** High uses TRELLIS.2's finest pass and Microsoft's own export settings: finer detail, about 3 times the time and file size.
 - **Inspect.** Turn and zoom, turntable, wireframe, reset view. The corner readout shows proportions, triangle count and file size, with the source photo pinned beside the model.
 - **Keep.** Download any result as `.glb`, open any `.glb` from your computer, and click back through every model made in the tab.
+- **Buildings from measurements.** The Buildings page turns walls, doors, windows and floor heights, typed as numbers in metres, into an exact 3D building at true size, with the dimensions on screen and a `.glb` download. No AI is involved, so nothing is guessed.
 - **Honest waiting.** A cold GPU takes 2.5 to 4.5 minutes. The page shows elapsed time against the usual window instead of a made-up progress bar.
 
 The interface is laid out like an architect's drawing sheet (title block, crop marks, hatching, a scale bar), because the long-term goal is buildings: see [Roadmap](#roadmap).
@@ -105,23 +106,30 @@ If `MODAL_TRELLIS_URL` is not set, photos (and pictures made from descriptions) 
 
 | Path | What it is |
 |---|---|
-| `app/page.tsx` | The workbench: layout, run log, waiting panel, title block |
+| `app/layout.tsx`, `app/workshop.tsx` | Shared header and page links; the run log and any job on the GPU live here, so changing page never drops a result |
+| `app/page.tsx` | Objects: the workbench (photo or description to 3D), waiting panel, title block |
+| `app/buildings/page.tsx` | Buildings: samples, the numbers editor, measured facts |
+| `app/how-it-works/page.tsx` | How it works: the notes sheet |
 | `app/components/InputHandler.tsx` | Photo and description input |
 | `app/components/ModelViewer.tsx` | 3D view (React Three Fiber): lighting, grid, camera fit, tools |
-| `app/components/Notes.tsx` | The "How a photo becomes a model" sheet below the tool |
+| `app/components/Notes.tsx` | The "How a photo becomes a model" sheet |
+| `app/components/BuildingViewer.tsx` | 3D view of a building at true scale, with dimension labels and export |
+| `lib/building.ts` | A building as numbers, turned into exact walls, openings and slabs; checks for impossible numbers |
+| `lib/building.test.ts` | Measures the built pieces against the numbers (`pnpm exec vitest run lib`) |
 | `app/api/generate-image/route.ts` | Turns a description into a product-shot picture (FLUX on NVIDIA) |
 | `app/api/generate-model/route.ts` | Sends a picture to Modal (or the fallback) and returns the GLB |
 | `trellis_modal.py` | TRELLIS.2 on Modal: the photo endpoint, with Draft and High settings |
 | `trellis1_modal.py` | TRELLIS text-xlarge and TRELLIS v1 on Modal, kept for comparisons |
 | `hunyuan3d_modal.py` | Hunyuan3D-2.1 on Modal, used only for the comparison |
-| `lib/cursor-swarm.js` | Vendored animation library that builds the notes sheet as you scroll |
+| `lib/cursor-swarm.js` | Vendored animation library that draws the notes sheet |
 | `public/samples/` | A ready-made TRELLIS.2 model of a mug, so the viewer can be tried without a GPU |
 
 Built with Next.js 16, React 19, React Three Fiber and Three.js, TypeScript.
 
 ## Roadmap
 
-- **Buildings.** The goal: architectural drawings and photos of buildings in, detailed building models out. Not tested yet. These models learned mostly from single objects, so whole buildings are the open question.
+- **Read a drawing.** Turn a real plan (CAD file, PDF or scan) into the numbers the Buildings page uses, then check the result against the drawing's own dimensions.
+- **Model switcher.** Run the same picture through TRELLIS.2, TRELLIS v1 or Hunyuan3D-2.1 and compare.
 - Several views of one object (front, sides, back) into a model built for it, so the sides a single picture never shows stop being guesses.
 - A check that compares the finished model with its picture before you see it.
 - Faster cold starts (cache compiled GPU kernels in the Modal volume).

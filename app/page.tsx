@@ -1,26 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import InputHandler, { type Quality } from './components/InputHandler';
+import InputHandler from './components/InputHandler';
 import ModelViewer from './components/ModelViewer';
-import Notes from './components/Notes';
-import type { GenerationInput, GenerateModelResponse } from '@/types/3d-model';
-
-type Kind = 'photo' | 'text' | 'file';
-// ponytail: runs live only in this tab's memory (GLBs are 2 to 14 MB each); add storage if people want them back later
-type Run = { id: number; kind: Kind; label: string; url: string; bytes: number; ref?: string; seconds?: number; high?: boolean };
-// kind is the GPU that runs the job: descriptions now become a picture first, so they run as 'photo' too
-type Job = { kind: 'photo' | 'text'; started: number; warm: boolean; high: boolean };
-
-// Modal keeps a GPU for 60 s after its last request (scaledown_window in trellis_modal.py / trellis1_modal.py).
-const WARM_MS = 55_000;
-// Expected windows in seconds, from runs logged on 16 Nov 2026. Cold Draft took 4:09 and 5:38 through the
-// app (cold starts vary). High: chair 161 s and tower 241 s of GPU work; warm High through the app 2:58.
-const WINDOW = { draft: { cold: [150, 360], warm: [30, 140] }, high: { cold: [300, 540], warm: [150, 300] } } as const;
-const halves = (s: number) => { const h = Math.round(s / 30) / 2; return `${Math.floor(h)}${h % 1 ? '½' : ''}`; };
-
-const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+import { clock, halves, mb, useShop, WINDOW, type Job } from './workshop';
 
 /** Its own component, so the one-second tick never re-renders the 3D view. */
 function JobPanel({ job }: { job: Job }) {
@@ -55,85 +38,16 @@ function JobPanel({ job }: { job: Job }) {
   );
 }
 
-export default function Home() {
-  const [runs, setRuns] = useState<Run[]>([]);
-  const [activeId, setActiveId] = useState<number | null>(null);
-  const [job, setJob] = useState<Job | null>(null);
-  const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
-  const lastDone = useRef<Partial<Record<'photo' | 'text', number>>>({});
+export default function Objects() {
+  const { runs, active, setActiveId, job, error, setError, submit, openFile, openSample } = useShop();
+  const activeId = active?.id ?? null;
   const fileRef = useRef<HTMLInputElement>(null);
-  const active = runs.find((r) => r.id === activeId) ?? null;
-
-  const addRun = (run: Omit<Run, 'id'>) => {
-    const id = Date.now();
-    setRuns((rs) => [{ ...run, id }, ...rs]);
-    setActiveId(id);
-    setError(null);
-    // On a phone the view sits below the form. Wait for the job panel to close first, or the scroll overshoots.
-    if (matchMedia('(max-width: 1023px)').matches) setTimeout(() => document.querySelector('.view')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
-  };
-
-  const handleSubmit = async (input: GenerationInput, quality: Quality) => {
-    const kind = input.type === 'image' ? 'photo' : 'text';
-    const started = Date.now();
-    const high = quality === 'high';
-    setJob({ kind, started, warm: started - (lastDone.current[kind] ?? 0) < WARM_MS, high });
-    setError(null);
-    try {
-      const res = await fetch('/api/generate-model', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: input.type, data: input.data, quality }),
-      });
-      const result: GenerateModelResponse = await res.json().catch(() => ({ success: false, error: { code: `HTTP_${res.status}`, message: res.statusText } }));
-      lastDone.current[kind] = Date.now();
-      if (!result.success || !result.model) {
-        setError({ message: 'The GPU could not make this one.', detail: result.error ? `${result.error.code}: ${result.error.message}` : undefined });
-        return;
-      }
-      const blob = await (await fetch(`data:model/gltf-binary;base64,${result.model.data}`)).blob();
-      addRun({
-        kind: input.type === 'image' && input.fromText ? 'text' : kind,
-        high,
-        label: input.type === 'image' ? input.name ?? 'photo' : input.data,
-        url: URL.createObjectURL(blob),
-        bytes: blob.size,
-        ref: input.type === 'image' ? input.preview : undefined,
-        seconds: (Date.now() - started) / 1000,
-      });
-    } catch (e) {
-      setError({ message: 'Lost the connection to the server before the model came back.', detail: e instanceof Error ? e.message : undefined });
-    } finally {
-      setJob(null);
-    }
-  };
-
-  const openFile = (f: File | undefined) => {
-    if (!f) return;
-    if (!/\.glb$/i.test(f.name)) return setError({ message: 'Only .glb files open here.' });
-    addRun({ kind: 'file', label: f.name, url: URL.createObjectURL(f), bytes: f.size });
-  };
-
-  const openSample = async () => {
-    const blob = await fetch('/samples/mug.glb').then((r) => (r.ok ? r.blob() : null)).catch(() => null);
-    if (!blob) return setError({ message: 'The sample is missing from public/samples.' });
-    addRun({ kind: 'file', label: 'Sample: mug (TRELLIS.2)', url: URL.createObjectURL(blob), bytes: blob.size, ref: '/samples/mug.jpg' });
-  };
 
   return (
-    <>
-      <div className="shop">
-        <header className="bar">
-          <span className="brand">Model <i>Shop</i></span>
-          <span className="sheet-no mono">Photo or words, to 3D</span>
-          <nav>
-            <a href="#notes">How it works</a>
-          </nav>
-        </header>
-
+    <div className="shop">
         <main className="bench">
           <aside className="rail left">
-            <InputHandler onSubmit={handleSubmit} isLoading={!!job} />
+            <InputHandler onSubmit={submit} isLoading={!!job} />
             {job && <JobPanel job={job} />}
             {error && !job && (
               <div className="block">
@@ -197,9 +111,6 @@ export default function Home() {
           <div><dt>Drawn</dt><dd suppressHydrationWarning>{new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</dd></div>
           <div className="sheet"><dt>Sheet</dt><dd>A-01</dd></div>
         </dl>
-      </div>
-
-      <Notes />
-    </>
+    </div>
   );
 }
