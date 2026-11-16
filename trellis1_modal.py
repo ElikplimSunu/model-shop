@@ -4,7 +4,7 @@ No gated models: DINOv2 comes from torch.hub (Apache 2.0), background removal is
     modal run trellis1_modal.py::check_imports           # CPU: build the image, prove imports
     modal run trellis1_modal.py::download                # CPU: cache weights in the volume
     modal run trellis1_modal.py --images a.png,b.png     # GPU: one container, all images, GLBs to demo/trellis1/
-Same credit guards as trellis_modal.py. Test entrypoint only; the comparison winner gets the web endpoint.
+Same credit guards as trellis_modal.py. Web endpoints: generate_text, and generate_image for the app's model switcher.
 """
 
 from __future__ import annotations  # lets the web endpoint name fastapi.Request, which only its own image installs
@@ -115,6 +115,7 @@ class Trellis1:
 
 # --- Text to 3D: TRELLIS-text-xlarge, the model NVIDIA's hosted trellis runs, on our own GPU ---
 secret = modal.Secret.from_name("trellis-3d")  # API_KEY, shared with trellis_modal.py
+MAX_UPLOAD = 10 * 1024 * 1024  # same limit as trellis_modal.py
 MAX_PROMPT = 1000
 
 
@@ -182,6 +183,24 @@ async def generate_text(request: Request):
     if not prompt or len(prompt) > MAX_PROMPT:
         raise HTTPException(400, f"Send a prompt of 1 to {MAX_PROMPT} characters")
     glb = await Trellis1Text().generate.remote.aio(prompt)
+    return Response(glb, media_type="model/gltf-binary")
+
+
+@app.function(image=web_image, secrets=[secret], timeout=900)  # includes the GPU cold start
+@modal.fastapi_endpoint(method="POST")
+async def generate_image(request: Request):
+    """POST raw image bytes with `Authorization: Bearer <API_KEY>`; returns a GLB. For the app's model switcher."""
+    import hmac
+    from fastapi import HTTPException
+    from fastapi.responses import Response
+
+    sent = request.headers.get("authorization", "")
+    if not hmac.compare_digest(sent.encode(), f"Bearer {os.environ['API_KEY']}".encode()):
+        raise HTTPException(401, "Invalid API key")  # checked on CPU, so a bad request never starts the GPU
+    body = await request.body()
+    if not body or len(body) > MAX_UPLOAD:
+        raise HTTPException(400, "Send one image of at most 10 MB")
+    glb = await Trellis1().generate.remote.aio(body)
     return Response(glb, media_type="model/gltf-binary")
 
 

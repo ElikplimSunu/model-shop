@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import InputHandler from './components/InputHandler';
 import ModelViewer from './components/ModelViewer';
+import { ENGINES } from '@/types/3d-model';
 import { clock, halves, mb, useShop, WINDOW, type Job } from './workshop';
 
 /** Its own component, so the one-second tick never re-renders the 3D view. */
@@ -10,30 +11,37 @@ function JobPanel({ job }: { job: Job }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const s = Math.max(0, (now - job.started) / 1000);
-  const w = job.high ? WINDOW.high : WINDOW.draft;
-  const [lo, hi] = job.warm ? w.warm : w.cold;
-  const span = (Math.floor(hi / 60) + 1) * 60;
+  const { name, reads } = ENGINES[job.engine];
+  // Usual windows are measured for TRELLIS.2 only; the other models show elapsed time until they have runs to go on.
+  // ponytail: add their windows to WINDOW once real runs through the app have been timed
+  const w = job.engine === 'trellis2' ? (job.high ? WINDOW.high : WINDOW.draft) : null;
+  const [lo, hi] = w ? (job.warm ? w.warm : w.cold) : [0, 0];
+  const span = w ? (Math.floor(hi / 60) + 1) * 60 : Math.max(5, Math.ceil((s + 1) / 60)) * 60;
   const pct = (x: number) => `${Math.min(100, (x / span) * 100)}%`;
   const minutes = Array.from({ length: span / 60 + 1 }, (_, i) => i);
 
   return (
     <div className="block job" aria-live="polite">
-      <h2 className="label"><b>02</b>On the GPU<span className="aside">{job.kind === 'photo' ? 'TRELLIS.2 · Meta DINOv3' : 'TRELLIS text · CLIP'}{job.high ? ' · High' : ''}</span></h2>
+      <h2 className="label"><b>02</b>On the GPU<span className="aside">{name} · {reads}{job.high ? ' · High' : ''}</span></h2>
       <p className="clock num">{clock(s)}</p>
       <p>
-        {s > hi
-          ? 'Taking longer than usual. It is still waiting for the GPU to answer.'
-          : job.warm
-            ? `The GPU was used less than a minute ago, so it should still be warm: usually under ${halves(hi)} minutes.`
-            : `The GPU starts from cold, so this usually takes ${halves(lo)} to ${halves(hi)} minutes. The next one will be quicker.`}
+        {!w
+          ? job.warm
+            ? `${name}'s GPU was used less than a minute ago, so it should still be warm.`
+            : `${name} runs on its own GPU, which starts from cold. There is no usual time for it yet; a cold start alone takes a few minutes.`
+          : s > hi
+            ? 'Taking longer than usual. It is still waiting for the GPU to answer.'
+            : job.warm
+              ? `The GPU was used less than a minute ago, so it should still be warm: usually under ${halves(hi)} minutes.`
+              : `The GPU starts from cold, so this usually takes ${halves(lo)} to ${halves(hi)} minutes. The next one will be quicker.`}
       </p>
       <div className="scale" aria-hidden="true">
         {minutes.slice(0, -1).map((m) => <span key={m} className="bar-seg" style={{ left: pct(m * 60), width: pct(60) }} />)}
-        <span className="band" style={{ left: pct(lo), width: `calc(${pct(hi)} - ${pct(lo)})` }} />
+        {w && <span className="band" style={{ left: pct(lo), width: `calc(${pct(hi)} - ${pct(lo)})` }} />}
         {minutes.map((m) => <span key={m} className="tick num" style={{ left: pct(m * 60) }}>{m}</span>)}
         <span className="now" style={{ left: pct(s) }} />
       </div>
-      <p className="hint mono" style={{ marginTop: 6 }}>minutes · hatched: the usual window</p>
+      <p className="hint mono" style={{ marginTop: 6 }}>{w ? 'minutes · hatched: the usual window' : 'minutes'}</p>
     </div>
   );
 }
@@ -92,7 +100,7 @@ export default function Objects() {
                         <span className="name" title={r.label}>{r.label}</span>
                         <span className="meta num">
                           {r.kind === 'photo' ? 'Photo' : r.kind === 'text' ? 'Description' : 'File'}
-                          {r.high ? ' · High' : ''}{r.seconds ? ` · ${clock(r.seconds)}` : ''} · {mb(r.bytes)}
+                          {r.engine ? ` · ${ENGINES[r.engine].name}` : ''}{r.high ? ' · High' : ''}{r.seconds ? ` · ${clock(r.seconds)}` : ''} · {mb(r.bytes)}
                         </span>
                       </span>
                     </button>
@@ -105,7 +113,7 @@ export default function Objects() {
 
         <dl className="titleblock">
           <div><dt>Project</dt><dd>Model Shop</dd></div>
-          <div><dt>Engines</dt><dd title="Photos: Microsoft TRELLIS.2, reading the photo with Meta DINOv3. Descriptions: a FLUX picture first (on NVIDIA), then the same TRELLIS.2 path.">Photo: TRELLIS.2 + DINOv3 · Words: FLUX picture, then TRELLIS.2</dd></div>
+          <div><dt>Engines</dt><dd title="Photos: Microsoft TRELLIS.2 (default), TRELLIS v1 or Tencent Hunyuan3D-2.1, each on its own GPU. Descriptions: a FLUX picture first (on NVIDIA), then the chosen model.">TRELLIS.2, TRELLIS v1 or Hunyuan3D-2.1 · Words: FLUX picture first</dd></div>
           <div><dt>Hardware</dt><dd>Modal · NVIDIA L40S</dd></div>
           <div><dt>Scale</dt><dd>Not to scale</dd></div>
           <div><dt>Drawn</dt><dd suppressHydrationWarning>{new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</dd></div>

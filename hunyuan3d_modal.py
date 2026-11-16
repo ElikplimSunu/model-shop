@@ -4,8 +4,10 @@ Ungated. Two stages: shape (DiT flow model, about 10 GB VRAM), then paint (multi
     modal run hunyuan3d_modal.py::check_imports          # CPU: build the image, prove imports
     modal run hunyuan3d_modal.py::download               # CPU: cache weights in the volume
     modal run hunyuan3d_modal.py --images a.png,b.png    # GPU: one container, all images, GLBs to demo/hunyuan3d/
-Same credit guards as trellis_modal.py. Test entrypoint only.
+Same credit guards as trellis_modal.py. Web endpoint `generate` for the app's model switcher (same API key).
 """
+
+from __future__ import annotations  # lets the web endpoint name fastapi.Request, which only its own image installs
 
 import os
 
@@ -152,6 +154,32 @@ class Hunyuan3D:
               f"{torch.cuda.max_memory_allocated() / 2**30:.1f} GiB, GLB {len(data) / 2**20:.1f} MiB")
         torch.cuda.empty_cache()
         return data
+
+
+secret = modal.Secret.from_name("trellis-3d")  # API_KEY, shared with trellis_modal.py
+MAX_UPLOAD = 10 * 1024 * 1024
+web_image = modal.Image.debian_slim().pip_install("fastapi[standard]")
+with web_image.imports():
+    from fastapi import Request
+
+
+# 1500 s: the GPU class may run 900 s, plus a cold start that loads two pipelines.
+@app.function(image=web_image, secrets=[secret], timeout=1500)
+@modal.fastapi_endpoint(method="POST")
+async def generate(request: Request):
+    """POST raw image bytes with `Authorization: Bearer <API_KEY>`; returns a GLB."""
+    import hmac
+    from fastapi import HTTPException
+    from fastapi.responses import Response
+
+    sent = request.headers.get("authorization", "")
+    if not hmac.compare_digest(sent.encode(), f"Bearer {os.environ['API_KEY']}".encode()):
+        raise HTTPException(401, "Invalid API key")  # checked on CPU, so a bad request never starts the GPU
+    body = await request.body()
+    if not body or len(body) > MAX_UPLOAD:
+        raise HTTPException(400, "Send one image of at most 10 MB")
+    glb = await Hunyuan3D().generate.remote.aio(body)
+    return Response(glb, media_type="model/gltf-binary")
 
 
 @app.local_entrypoint()

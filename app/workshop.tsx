@@ -3,14 +3,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createContext, useContext, useRef, useState } from 'react';
-import type { GenerationInput, GenerateModelResponse } from '@/types/3d-model';
+import type { Engine, GenerationInput, GenerateModelResponse } from '@/types/3d-model';
 import type { Quality } from './components/InputHandler';
 
 export type Kind = 'photo' | 'text' | 'file';
 // ponytail: runs live only in this tab's memory (GLBs are 2 to 36 MB each); add storage if people want them back later
-export type Run = { id: number; kind: Kind; label: string; url: string; bytes: number; ref?: string; seconds?: number; high?: boolean };
-// kind is the GPU that runs the job: descriptions become a picture first, so they run as 'photo' too
-export type Job = { kind: 'photo' | 'text'; started: number; warm: boolean; high: boolean };
+export type Run = { id: number; kind: Kind; label: string; url: string; bytes: number; ref?: string; seconds?: number; high?: boolean; engine?: Engine };
+// engine is the GPU that runs the job: descriptions become a picture first, so they run on a photo engine too
+export type Job = { engine: Engine; started: number; warm: boolean; high: boolean };
 type Problem = { message: string; detail?: string } | null;
 
 // Modal keeps a GPU for 60 s after its last request (scaledown_window in trellis_modal.py / trellis1_modal.py).
@@ -25,7 +25,7 @@ export const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
 type Shop = {
   runs: Run[]; active: Run | null; setActiveId: (id: number) => void;
   job: Job | null; error: Problem; setError: (p: Problem) => void;
-  submit: (input: GenerationInput, quality: Quality) => Promise<void>;
+  submit: (input: GenerationInput, quality: Quality, engine: Engine) => Promise<void>;
   openFile: (f: File | undefined) => void; openSample: () => Promise<void>;
 };
 const ShopContext = createContext<Shop | null>(null);
@@ -46,7 +46,7 @@ export default function Workshop({ children }: { children: React.ReactNode }) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [error, setError] = useState<Problem>(null);
-  const lastDone = useRef<Partial<Record<'photo' | 'text', number>>>({});
+  const lastDone = useRef<Partial<Record<Engine, number>>>({}); // per engine: each model has its own GPU
   const path = usePathname();
 
   const addRun = (run: Omit<Run, 'id'>) => {
@@ -58,20 +58,20 @@ export default function Workshop({ children }: { children: React.ReactNode }) {
     if (matchMedia('(max-width: 1023px)').matches) setTimeout(() => document.querySelector('.view')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
   };
 
-  const submit = async (input: GenerationInput, quality: Quality) => {
+  const submit = async (input: GenerationInput, quality: Quality, engine: Engine) => {
     const kind = input.type === 'image' ? 'photo' : 'text';
     const started = Date.now();
     const high = quality === 'high';
-    setJob({ kind, started, warm: started - (lastDone.current[kind] ?? 0) < WARM_MS, high });
+    setJob({ engine, started, warm: started - (lastDone.current[engine] ?? 0) < WARM_MS, high });
     setError(null);
     try {
       const res = await fetch('/api/generate-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: input.type, data: input.data, quality }),
+        body: JSON.stringify({ type: input.type, data: input.data, quality, engine }),
       });
       const result: GenerateModelResponse = await res.json().catch(() => ({ success: false, error: { code: `HTTP_${res.status}`, message: res.statusText } }));
-      lastDone.current[kind] = Date.now();
+      lastDone.current[engine] = Date.now();
       if (!result.success || !result.model) {
         setError({ message: 'The GPU could not make this one.', detail: result.error ? `${result.error.code}: ${result.error.message}` : undefined });
         return;
@@ -80,6 +80,7 @@ export default function Workshop({ children }: { children: React.ReactNode }) {
       addRun({
         kind: input.type === 'image' && input.fromText ? 'text' : kind,
         high,
+        engine,
         label: input.type === 'image' ? input.name ?? 'photo' : input.data,
         url: URL.createObjectURL(blob),
         bytes: blob.size,
