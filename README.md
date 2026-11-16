@@ -81,10 +81,10 @@ MODAL_TRELLIS_KEY=<your-random-key>
 
 ```bash
 pnpm install
-pnpm run build && pnpm run start     # http://localhost:3000, and on your network at http://<your-ip>:3000
+pnpm run build && pnpm run start     # http://localhost:3000, this computer only
 ```
 
-`pnpm run dev` works for development, but other devices on your network cannot load dev builds, so demo from the production build.
+Both scripts listen on 127.0.0.1 only, on purpose: anyone who can open the app can spend your GPU credits. Do not put it on a network or the internet without a login and rate limits in front of it.
 
 ### Costs and guards
 
