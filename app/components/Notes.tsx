@@ -43,8 +43,9 @@ function Notes() {
     <section className="notes" id="notes" ref={root} data-cs="none">
       <div className="notes-inner" data-cs="none">
         <p className="label" data-cs="none"><b>A-02</b>General notes</p>
-        <h2>How a photo becomes a model</h2>
-        <p className="lede">
+        {/* On its own page the sheet is all you see, so the heading and intro show at once; the cursor draws the rest */}
+        <h2 data-cs-ignore>How a photo becomes a model</h2>
+        <p className="lede" data-cs-ignore>
           Each request goes to an AI model running on a rented GPU. It reads the photo or description and
           draws a full 3D object, the way a model maker builds a massing model and then adds the detail.
         </p>
