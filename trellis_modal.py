@@ -112,36 +112,47 @@ class Trellis:
         print(f"model loaded in {time.time() - t:.0f}s")
 
     @modal.method()
-    def generate(self, image_bytes: bytes, seed: int = 42) -> bytes:
+    def generate(self, image_bytes: bytes, seed: int = 42, pipeline_type: str = "1024_cascade",
+                 decimation_target: int = 300000, texture_size: int = 2048) -> bytes:
+        # Defaults are what the app has used since day one. Microsoft's example.py exports at
+        # 1,000,000 faces and 4096 px; pipeline_type '1536_cascade' is TRELLIS.2's finest geometry.
         import io, tempfile, time  # noqa: E401
         import o_voxel, torch  # noqa: E401
         from PIL import Image
 
         t = time.time()
         torch.cuda.reset_peak_memory_stats()
-        mesh = self.pipe.run(Image.open(io.BytesIO(image_bytes)), seed=seed)[0]
+        mesh = self.pipe.run(Image.open(io.BytesIO(image_bytes)), seed=seed, pipeline_type=pipeline_type)[0]
         mesh.simplify(16777216)  # nvdiffrast limit
         glb = o_voxel.postprocess.to_glb(
             vertices=mesh.vertices, faces=mesh.faces, attr_volume=mesh.attrs, coords=mesh.coords,
             attr_layout=mesh.layout, voxel_size=mesh.voxel_size, aabb=[[-0.5] * 3, [0.5] * 3],
-            decimation_target=300000, texture_size=2048,  # same output size as the HF Space route
+            decimation_target=decimation_target, texture_size=texture_size,
             remesh=True, remesh_band=1, remesh_project=0,
         )
         with tempfile.NamedTemporaryFile(suffix=".glb") as f:
             glb.export(f.name, extension_webp=True)
             data = open(f.name, "rb").read()
-        print(f"generated in {time.time() - t:.0f}s, peak VRAM "
+        print(f"{pipeline_type}, {decimation_target} faces, {texture_size} px: generated in {time.time() - t:.0f}s, peak VRAM "
               f"{torch.cuda.max_memory_allocated() / 2**30:.1f} GiB, GLB {len(data) / 2**20:.1f} MiB")
         torch.cuda.empty_cache()
         return data
 
+
+# Draft: what the app has always used (chair 48 s, 10 MB). High: Microsoft's example.py export at the
+# finest geometry pass (chair 161 s, 36 MB, 26 to 30 GiB peak on the L40S). Measured 16 Nov 2026.
+QUALITY = {
+    "draft": dict(pipeline_type="1024_cascade", decimation_target=300000, texture_size=2048),
+    "high": dict(pipeline_type="1536_cascade", decimation_target=1000000, texture_size=4096),
+}
 
 web_image = modal.Image.debian_slim().pip_install("fastapi[standard]")
 with web_image.imports():
     from fastapi import Request
 
 
-@app.function(image=web_image, secrets=[secret], timeout=600)
+# 900 s: this wait includes the GPU cold start, and a cold High run can reach 9 minutes in total.
+@app.function(image=web_image, secrets=[secret], timeout=900)
 @modal.fastapi_endpoint(method="POST")
 async def generate(request: Request):
     """POST raw image bytes with `Authorization: Bearer <API_KEY>`; returns a GLB."""
@@ -155,19 +166,23 @@ async def generate(request: Request):
     body = await request.body()
     if not body or len(body) > MAX_UPLOAD:
         raise HTTPException(400, "Send one image of at most 10 MB")
-    glb = await Trellis().generate.remote.aio(body)
+    # ?quality=high asks for TRELLIS.2's finest pass; anything else is draft (the original settings).
+    settings = QUALITY.get(request.query_params.get("quality", ""), QUALITY["draft"])
+    glb = await Trellis().generate.remote.aio(body, **settings)
     return Response(glb, media_type="model/gltf-binary")
 
 
 @app.local_entrypoint()
-def main(images: str, out_dir: str = "demo/trellis2"):
+def main(images: str, out_dir: str = "demo/trellis2", pipeline_type: str = "1024_cascade",
+         decimation_target: int = 300000, texture_size: int = 2048):
     """Comma-separated image paths; all run in one warm container, so the model loads once."""
     import time
     os.makedirs(out_dir, exist_ok=True)
     model = Trellis()
     for path in images.split(","):
         t = time.time()
-        data = model.generate.remote(open(path, "rb").read())
+        data = model.generate.remote(open(path, "rb").read(), pipeline_type=pipeline_type,
+                                     decimation_target=decimation_target, texture_size=texture_size)
         out = os.path.join(out_dir, os.path.splitext(os.path.basename(path))[0] + ".glb")
         open(out, "wb").write(data)
         print(f"saved {out} ({len(data) / 2**20:.1f} MiB) in {time.time() - t:.0f}s round trip")

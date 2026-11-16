@@ -84,7 +84,7 @@ function Notes() {
               tested yet. These models learned mostly from single objects, so whole buildings are the open
               question for the next round.
             </p>
-            <p style={{ margin: 0 }}>Photos use TRELLIS.2 with Meta&apos;s DINOv3 as its eyes. Descriptions use TRELLIS text-xlarge, Microsoft&apos;s text-to-3D model, on the same kind of GPU.</p>
+            <p style={{ margin: 0 }}>Photos use TRELLIS.2 with Meta&apos;s DINOv3 as its eyes. Descriptions first become a picture (FLUX, hosted by NVIDIA) that you check, then take the same photo path. Microsoft recommends this over its own text model, which drops style and material words.</p>
           </div>
         </div>
       </div>

@@ -121,6 +121,14 @@ button, input, textarea { font: inherit; color: inherit; }
 .drop img { max-height: 200px; max-width: 100%; object-fit: contain; }
 .drop .caption { font-size: 11px; color: var(--ink-2); }
 .hint { margin: 10px 0 0; font-size: 12px; color: var(--ink-3); }
+.drop.still { cursor: default; }
+.drop.still:hover { border-color: var(--ink-3); border-style: dashed; }
+.quality { display: flex; align-items: center; margin-top: 16px; }
+.quality button { background: none; border: 1px solid var(--rule); padding: 6px 14px; cursor: pointer; color: var(--ink-2); font-size: 13px; }
+.quality button + button { border-left: 0; }
+.quality button[aria-checked="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.quality button:disabled { cursor: not-allowed; }
+.quality span { margin-left: 10px; font-size: 11px; color: var(--ink-3); }
 .linkish { background: none; border: 0; padding: 0; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 12px; }
 .linkish:hover { color: var(--red); }
 

@@ -1,20 +1,23 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import InputHandler from './components/InputHandler';
+import InputHandler, { type Quality } from './components/InputHandler';
 import ModelViewer from './components/ModelViewer';
 import Notes from './components/Notes';
 import type { GenerationInput, GenerateModelResponse } from '@/types/3d-model';
 
 type Kind = 'photo' | 'text' | 'file';
 // ponytail: runs live only in this tab's memory (GLBs are 2 to 14 MB each); add storage if people want them back later
-type Run = { id: number; kind: Kind; label: string; url: string; bytes: number; ref?: string; seconds?: number };
-type Job = { kind: 'photo' | 'text'; started: number; warm: boolean };
+type Run = { id: number; kind: Kind; label: string; url: string; bytes: number; ref?: string; seconds?: number; high?: boolean };
+// kind is the GPU that runs the job: descriptions now become a picture first, so they run as 'photo' too
+type Job = { kind: 'photo' | 'text'; started: number; warm: boolean; high: boolean };
 
 // Modal keeps a GPU for 60 s after its last request (scaledown_window in trellis_modal.py / trellis1_modal.py).
 const WARM_MS = 55_000;
-// Expected windows in seconds, from the cold and warm runs logged on 16 Nov 2026.
-const WINDOW = { cold: [150, 270], warm: [30, 140] } as const;
+// Expected windows in seconds, from runs logged on 16 Nov 2026. Cold Draft took 4:09 and 5:38 through the
+// app (cold starts vary). High: chair 161 s and tower 241 s of GPU work; warm High through the app 2:58.
+const WINDOW = { draft: { cold: [150, 360], warm: [30, 140] }, high: { cold: [300, 540], warm: [150, 300] } } as const;
+const halves = (s: number) => { const h = Math.round(s / 30) / 2; return `${Math.floor(h)}${h % 1 ? '½' : ''}`; };
 
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -24,21 +27,22 @@ function JobPanel({ job }: { job: Job }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const s = Math.max(0, (now - job.started) / 1000);
-  const [lo, hi] = job.warm ? WINDOW.warm : WINDOW.cold;
-  const span = job.warm ? 180 : 300;
+  const w = job.high ? WINDOW.high : WINDOW.draft;
+  const [lo, hi] = job.warm ? w.warm : w.cold;
+  const span = (Math.floor(hi / 60) + 1) * 60;
   const pct = (x: number) => `${Math.min(100, (x / span) * 100)}%`;
   const minutes = Array.from({ length: span / 60 + 1 }, (_, i) => i);
 
   return (
     <div className="block job" aria-live="polite">
-      <h2 className="label"><b>02</b>On the GPU<span className="aside">{job.kind === 'photo' ? 'TRELLIS.2 · Meta DINOv3' : 'TRELLIS text · CLIP'}</span></h2>
+      <h2 className="label"><b>02</b>On the GPU<span className="aside">{job.kind === 'photo' ? 'TRELLIS.2 · Meta DINOv3' : 'TRELLIS text · CLIP'}{job.high ? ' · High' : ''}</span></h2>
       <p className="clock num">{clock(s)}</p>
       <p>
         {s > hi
           ? 'Taking longer than usual. It is still waiting for the GPU to answer.'
           : job.warm
-            ? 'The GPU was used less than a minute ago, so it should still be warm: usually under 2½ minutes.'
-            : 'The GPU starts from cold, so this usually takes 2½ to 4½ minutes. The next one will be quicker.'}
+            ? `The GPU was used less than a minute ago, so it should still be warm: usually under ${halves(hi)} minutes.`
+            : `The GPU starts from cold, so this usually takes ${halves(lo)} to ${halves(hi)} minutes. The next one will be quicker.`}
       </p>
       <div className="scale" aria-hidden="true">
         {minutes.slice(0, -1).map((m) => <span key={m} className="bar-seg" style={{ left: pct(m * 60), width: pct(60) }} />)}
@@ -69,16 +73,17 @@ export default function Home() {
     if (matchMedia('(max-width: 1023px)').matches) setTimeout(() => document.querySelector('.view')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
   };
 
-  const handleSubmit = async (input: GenerationInput) => {
+  const handleSubmit = async (input: GenerationInput, quality: Quality) => {
     const kind = input.type === 'image' ? 'photo' : 'text';
     const started = Date.now();
-    setJob({ kind, started, warm: started - (lastDone.current[kind] ?? 0) < WARM_MS });
+    const high = quality === 'high';
+    setJob({ kind, started, warm: started - (lastDone.current[kind] ?? 0) < WARM_MS, high });
     setError(null);
     try {
       const res = await fetch('/api/generate-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: input.type, data: input.data }),
+        body: JSON.stringify({ type: input.type, data: input.data, quality }),
       });
       const result: GenerateModelResponse = await res.json().catch(() => ({ success: false, error: { code: `HTTP_${res.status}`, message: res.statusText } }));
       lastDone.current[kind] = Date.now();
@@ -88,7 +93,8 @@ export default function Home() {
       }
       const blob = await (await fetch(`data:model/gltf-binary;base64,${result.model.data}`)).blob();
       addRun({
-        kind,
+        kind: input.type === 'image' && input.fromText ? 'text' : kind,
+        high,
         label: input.type === 'image' ? input.name ?? 'photo' : input.data,
         url: URL.createObjectURL(blob),
         bytes: blob.size,
@@ -172,7 +178,7 @@ export default function Home() {
                         <span className="name" title={r.label}>{r.label}</span>
                         <span className="meta num">
                           {r.kind === 'photo' ? 'Photo' : r.kind === 'text' ? 'Description' : 'File'}
-                          {r.seconds ? ` · ${clock(r.seconds)}` : ''} · {mb(r.bytes)}
+                          {r.high ? ' · High' : ''}{r.seconds ? ` · ${clock(r.seconds)}` : ''} · {mb(r.bytes)}
                         </span>
                       </span>
                     </button>
@@ -185,7 +191,7 @@ export default function Home() {
 
         <dl className="titleblock">
           <div><dt>Project</dt><dd>Model Shop</dd></div>
-          <div><dt>Engines</dt><dd title="Photos: Microsoft TRELLIS.2, reading the photo with Meta DINOv3. Text: Microsoft TRELLIS text-xlarge.">Photo: TRELLIS.2 + DINOv3 · Text: TRELLIS text-xlarge</dd></div>
+          <div><dt>Engines</dt><dd title="Photos: Microsoft TRELLIS.2, reading the photo with Meta DINOv3. Descriptions: a FLUX picture first (on NVIDIA), then the same TRELLIS.2 path.">Photo: TRELLIS.2 + DINOv3 · Words: FLUX picture, then TRELLIS.2</dd></div>
           <div><dt>Hardware</dt><dd>Modal · NVIDIA L40S</dd></div>
           <div><dt>Scale</dt><dd>Not to scale</dd></div>
           <div><dt>Drawn</dt><dd suppressHydrationWarning>{new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</dd></div>
