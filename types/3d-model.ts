@@ -7,10 +7,19 @@ export type GenerationInput =
   | { type: 'text'; data: string };
 
 // API Request/Response types
+/** Image-to-3D models the app can switch between. Each runs on its own Modal GPU. */
+export const ENGINES = {
+  trellis2: { name: 'TRELLIS.2', reads: 'Meta DINOv3', env: 'MODAL_TRELLIS_URL' },
+  trellis1: { name: 'TRELLIS v1', reads: 'DINOv2', env: 'MODAL_TRELLIS1_URL' },
+  hunyuan: { name: 'Hunyuan3D-2.1', reads: 'Tencent', env: 'MODAL_HUNYUAN_URL' },
+} as const;
+export type Engine = keyof typeof ENGINES;
+
 export interface GenerateModelRequest {
   type: 'image' | 'text';
   data: string; // base64 image or text prompt
-  quality?: 'draft' | 'high'; // photos on Modal only
+  quality?: 'draft' | 'high'; // TRELLIS.2 photos on Modal only
+  engine?: Engine; // photos only; default trellis2
 }
 
 export interface GenerateModelResponse {

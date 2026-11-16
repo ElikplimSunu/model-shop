@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { GenerateModelRequest, GenerateModelResponse } from '@/types/3d-model';
+import { ENGINES, type GenerateModelRequest, type GenerateModelResponse } from '@/types/3d-model';
 import { Client } from "@gradio/client";
 
 // Disable caching for this dynamic route
@@ -172,13 +172,30 @@ export async function POST(request: NextRequest) {
       }
       const buffer = Buffer.from(imageData, 'base64');
 
-      // Own TRELLIS.2 on Modal (trellis_modal.py) when configured; HF Space otherwise.
+      // The model switcher: only the engines listed in ENGINES. An engine without its endpoint configured is an
+      // error, never a silent fall back to TRELLIS.2, or a comparison would compare TRELLIS.2 with itself.
+      const engine = body.engine ?? 'trellis2';
+      if (!Object.hasOwn(ENGINES, engine)) {
+        return NextResponse.json<GenerateModelResponse>(
+          { success: false, error: { code: 'INVALID_REQUEST', message: `Unknown model "${String(engine).slice(0, 40)}"` } },
+          { status: 400 }
+        );
+      }
+      const { name, env } = ENGINES[engine];
+      // Own GPUs on Modal (trellis_modal.py, trellis1_modal.py, hunyuan3d_modal.py); HF Space only for TRELLIS.2.
       // Modal answers long jobs with a 303 to a result URL, which fetch follows on its own.
-      const modalUrl = process.env.MODAL_TRELLIS_URL;
+      const modalUrl = process.env[env];
+      if (!modalUrl && engine !== 'trellis2') {
+        return NextResponse.json<GenerateModelResponse>(
+          { success: false, error: { code: 'NOT_CONFIGURED', message: `${name} has no endpoint: set ${env} in .env.local` } },
+          { status: 503 }
+        );
+      }
       if (modalUrl) {
-        console.log('Sending Image-to-3D request to Modal TRELLIS.2...');
+        console.log(`Sending Image-to-3D request to Modal ${name}...`);
         // High: TRELLIS.2's finest pass, about 3x the time and file size (see QUALITY in trellis_modal.py)
-        const modalResponse = await fetch(body.quality === 'high' ? `${modalUrl}?quality=high` : modalUrl, {
+        const high = engine === 'trellis2' && body.quality === 'high';
+        const modalResponse = await fetch(high ? `${modalUrl}?quality=high` : modalUrl, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${process.env.MODAL_TRELLIS_KEY}`,
@@ -191,7 +208,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json<GenerateModelResponse>(
             {
               success: false,
-              error: { code: 'API_ERROR', message: `Modal TRELLIS.2 failed with status ${modalResponse.status}: ${detail.slice(0, 200)}` },
+              error: { code: 'API_ERROR', message: `Modal ${name} failed with status ${modalResponse.status}: ${detail.slice(0, 200)}` },
             },
             { status: 502 }
           );

@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { GenerationInput } from '@/types/3d-model';
+import { ENGINES, type Engine, type GenerationInput } from '@/types/3d-model';
 
 export type Quality = 'draft' | 'high';
 
 interface InputHandlerProps {
-  onSubmit: (input: GenerationInput, quality: Quality) => Promise<void>;
+  onSubmit: (input: GenerationInput, quality: Quality, engine: Engine) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -31,6 +31,8 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
   const [problem, setProblem] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const [quality, setQuality] = useState<Quality>('draft');
+  const [engine, setEngine] = useState<Engine>('trellis2');
+  const detail: Quality = engine === 'trellis2' ? quality : 'draft'; // Draft / High exists only for TRELLIS.2
   // Words become a picture first (TRELLIS's text model drops style and material words), and the
   // person checks the picture before any GPU time is spent on the 3D step.
   const [picture, setPicture] = useState<string | null>(null);
@@ -65,7 +67,7 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
     if (isLoading || drawing) return;
     if (mode === 'text') {
       if (!picture) return makePicture();
-      return onSubmit({ type: 'image', data: picture, preview: `data:image/jpeg;base64,${picture}`, name: text.trim(), fromText: true }, quality);
+      return onSubmit({ type: 'image', data: picture, preview: `data:image/jpeg;base64,${picture}`, name: text.trim(), fromText: true }, detail, engine);
     }
     if (!file) return setProblem('Add a photo first.');
     const data = await new Promise<string>((resolve, reject) => {
@@ -76,7 +78,7 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
     }).catch(() => null);
     if (!data) return setProblem('Could not read that photo. Try another one.');
     // a fresh URL for the log, because this component revokes its own when the photo changes
-    await onSubmit({ type: 'image', data, preview: URL.createObjectURL(file), name: file.name }, quality);
+    await onSubmit({ type: 'image', data, preview: URL.createObjectURL(file), name: file.name }, detail, engine);
   };
 
   const ready = mode === 'text' ? text.trim().length > 0 : !!file;
@@ -161,14 +163,25 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
 
       {problem && <div className="err" role="alert" style={{ marginTop: 14 }}><p>{problem}</p></div>}
 
-      <div className="quality" role="radiogroup" aria-label="Detail">
-        {(['draft', 'high'] as const).map((q) => (
-          <button key={q} type="button" role="radio" aria-checked={quality === q} disabled={isLoading} onClick={() => setQuality(q)}>
-            {q === 'draft' ? 'Draft' : 'High'}
-          </button>
-        ))}
-        <span className="mono">{quality === 'high' ? 'finer detail · about 3× the time and file size' : 'the usual detail'}</span>
-      </div>
+      <label className="engine">
+        <span className="mono">Model</span>
+        <select value={engine} disabled={isLoading} onChange={(e) => setEngine(e.target.value as Engine)}>
+          {(Object.keys(ENGINES) as Engine[]).map((k) => <option key={k} value={k}>{ENGINES[k].name}</option>)}
+        </select>
+      </label>
+
+      {engine === 'trellis2' ? (
+        <div className="quality" role="radiogroup" aria-label="Detail">
+          {(['draft', 'high'] as const).map((q) => (
+            <button key={q} type="button" role="radio" aria-checked={quality === q} disabled={isLoading} onClick={() => setQuality(q)}>
+              {q === 'draft' ? 'Draft' : 'High'}
+            </button>
+          ))}
+          <span className="mono">{quality === 'high' ? 'finer detail · about 3× the time and file size' : 'the usual detail'}</span>
+        </div>
+      ) : (
+        <p className="hint mono">Its own GPU: the first run starts cold. One detail setting, the model&rsquo;s defaults.</p>
+      )}
 
       <button type="button" className="go" disabled={!ready || isLoading || drawing} onClick={submit}>
         {label}

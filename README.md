@@ -10,6 +10,7 @@ A description first becomes a picture (FLUX, hosted by NVIDIA), which you check 
 
 - **Photo to 3D.** Drop in a JPG, PNG or WebP of one object. You get a textured 3D model (GLB).
 - **Description to 3D.** Describe one object in a sentence. It becomes a picture in about 10 seconds; if the picture matches your words, the photo path turns it into 3D. If not, make another picture (free).
+- **Pick the model.** TRELLIS.2 (the default), TRELLIS v1 or Hunyuan3D-2.1, each on its own GPU, so you can compare them on the same picture. The run log names the model behind each result.
 - **Draft or High.** High uses TRELLIS.2's finest pass and Microsoft's own export settings: finer detail, about 3 times the time and file size.
 - **Inspect.** Turn and zoom, turntable, wireframe, reset view. The corner readout shows proportions, triangle count and file size, with the source photo pinned beside the model.
 - **Keep.** Download any result as `.glb`, open any `.glb` from your computer, and click back through every model made in the tab.
@@ -67,7 +68,7 @@ modal deploy trellis_modal.py                # photo endpoint
 
 ```
 
-`trellis1_modal.py` (the older direct text-to-3D model, TRELLIS text-xlarge) is optional: the app no longer uses it, it is kept for comparisons.
+Optional, for the model picker: the same three steps for `trellis1_modal.py` (TRELLIS v1) and `hunyuan3d_modal.py` (Hunyuan3D-2.1). Both endpoints use the same API key. `trellis1_modal.py` also holds the older direct text-to-3D model, which the app no longer uses.
 
 Each `deploy` prints an endpoint address ending in `.modal.run`.
 
@@ -77,7 +78,11 @@ Each `deploy` prints an endpoint address ending in `.modal.run`.
 MODAL_TRELLIS_URL=<photo endpoint address>
 MODAL_TRELLIS_KEY=<your-random-key>
 NVIDIA_API_KEY=<key from build.nvidia.com>   # pictures for descriptions (FLUX.1-dev, free trial credits)
+MODAL_TRELLIS1_URL=<TRELLIS v1 generate_image address>   # optional, model picker
+MODAL_HUNYUAN_URL=<Hunyuan3D-2.1 generate address>       # optional, model picker
 ```
+
+A model picked without its address set answers with an error; it never falls back to TRELLIS.2.
 
 FLUX.1-dev's weights carry a non-commercial licence. Check NVIDIA's and Black Forest Labs' terms before any paid use.
 
@@ -119,8 +124,8 @@ If `MODAL_TRELLIS_URL` is not set, photos (and pictures made from descriptions) 
 | `app/api/generate-image/route.ts` | Turns a description into a product-shot picture (FLUX on NVIDIA) |
 | `app/api/generate-model/route.ts` | Sends a picture to Modal (or the fallback) and returns the GLB |
 | `trellis_modal.py` | TRELLIS.2 on Modal: the photo endpoint, with Draft and High settings |
-| `trellis1_modal.py` | TRELLIS text-xlarge and TRELLIS v1 on Modal, kept for comparisons |
-| `hunyuan3d_modal.py` | Hunyuan3D-2.1 on Modal, used only for the comparison |
+| `trellis1_modal.py` | TRELLIS v1 (image endpoint for the model picker) and TRELLIS text-xlarge on Modal |
+| `hunyuan3d_modal.py` | Hunyuan3D-2.1 on Modal (endpoint for the model picker) |
 | `lib/cursor-swarm.js` | Vendored animation library that draws the notes sheet |
 | `public/samples/` | A ready-made TRELLIS.2 model of a mug, so the viewer can be tried without a GPU |
 
@@ -129,7 +134,6 @@ Built with Next.js 16, React 19, React Three Fiber and Three.js, TypeScript.
 ## Roadmap
 
 - **Read a drawing.** Turn a real plan (CAD file, PDF or scan) into the numbers the Buildings page uses, then check the result against the drawing's own dimensions.
-- **Model switcher.** Run the same picture through TRELLIS.2, TRELLIS v1 or Hunyuan3D-2.1 and compare.
 - Several views of one object (front, sides, back) into a model built for it, so the sides a single picture never shows stop being guesses.
 - A check that compares the finished model with its picture before you see it.
 - Faster cold starts (cache compiled GPU kernels in the Modal volume).
