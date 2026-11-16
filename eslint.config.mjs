@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // vendored third-party file, kept byte-for-byte
+    "lib/cursor-swarm.js",
   ]),
 ]);
 

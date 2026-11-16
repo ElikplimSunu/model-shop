@@ -1,365 +1,192 @@
 'use client';
 
 import { Canvas, useLoader, useThree } from '@react-three/fiber';
-import { OrbitControls } from '@react-three/drei';
-import { ModelViewerProps } from '@/types/3d-model';
-import { Suspense, useEffect, useRef, useState, Component, ReactNode } from 'react';
+import { ContactShadows, Grid, OrbitControls } from '@react-three/drei';
+import { Component, ComponentRef, ReactNode, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
-/**
- * Performance Monitor Hook
- * 
- * Monitors frame rate during interactions and provides performance warnings.
- * Tracks FPS over a rolling window to detect performance issues.
- */
-function usePerformanceMonitor() {
-  const [fps, setFps] = useState<number>(60);
-  const [showWarning, setShowWarning] = useState(false);
-  const frameTimesRef = useRef<number[]>([]);
-  const lastFrameTimeRef = useRef<number>(performance.now());
-  const animationFrameRef = useRef<number | null>(null);
+type Stats = { url: string; w: number; d: number; h: number; tris: number };
+type Controls = { target: THREE.Vector3; update(): void; saveState(): void };
 
-  useEffect(() => {
-    const measureFPS = () => {
-      const now = performance.now();
-      const delta = now - lastFrameTimeRef.current;
-      lastFrameTimeRef.current = now;
+const SIDE = 2; // every model is scaled so its longest side is 2 units; the grid and camera are set for that
 
-      // Add frame time to rolling window (keep last 60 frames)
-      frameTimesRef.current.push(delta);
-      if (frameTimesRef.current.length > 60) {
-        frameTimesRef.current.shift();
-      }
+const darkQuery = '(prefers-color-scheme: dark)';
+const useDark = () => useSyncExternalStore(
+  (cb) => { const m = matchMedia(darkQuery); m.addEventListener('change', cb); return () => m.removeEventListener('change', cb); },
+  () => matchMedia(darkQuery).matches,
+  () => false,
+);
 
-      // Calculate average FPS from frame times
-      if (frameTimesRef.current.length >= 10) {
-        const avgFrameTime = frameTimesRef.current.reduce((a, b) => a + b, 0) / frameTimesRef.current.length;
-        const currentFps = 1000 / avgFrameTime;
-        setFps(Math.round(currentFps));
-
-        // Show warning if FPS drops below 30
-        setShowWarning(currentFps < 30);
-      }
-
-      animationFrameRef.current = requestAnimationFrame(measureFPS);
-    };
-
-    animationFrameRef.current = requestAnimationFrame(measureFPS);
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, []);
-
-  return { fps, showWarning };
+/** Neutral studio lighting built locally (no HDR download), close to model-viewer's "neutral". */
+function Studio() {
+  const gl = useThree((s) => s.gl);
+  const env = useMemo(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const tex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    return tex;
+  }, [gl]);
+  useEffect(() => () => env.dispose(), [env]);
+  return <primitive object={env} attach="environment" />;
 }
 
-/**
- * Error Boundary for Three.js Canvas content
- * 
- * Catches errors thrown by useLoader/Suspense inside the R3F Canvas
- * and reports them to the parent via onError callback.
- */
-class CanvasErrorBoundary extends Component<
-  { children: ReactNode; onError?: (error: Error) => void },
-  { hasError: boolean }
-> {
-  constructor(props: { children: ReactNode; onError?: (error: Error) => void }) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  componentDidCatch(error: Error) {
-    console.error('CanvasErrorBoundary caught:', error);
-    if (this.props.onError) {
-      this.props.onError(error);
-    }
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return null; // Render nothing inside the canvas on error
-    }
-    return this.props.children;
-  }
-}
-
-/**
- * Model Component
- * 
- * Loads and renders a GLB model using useLoader with GLTFLoader directly.
- * In drei v10, useGLTF's 4th arg is extendLoader (NOT an error callback),
- * so we use useLoader directly for proper Suspense-based error handling.
- * Automatically fits the model within viewport boundaries.
- */
-function Model({ 
-  url, 
-  onLoadSuccess 
-}: { 
-  url: string; 
-  onLoadSuccess?: () => void; 
-}) {
-  const groupRef = useRef<THREE.Group>(null);
-  const { camera } = useThree();
-  
-  // Load GLB model using useLoader with GLTFLoader directly.
+function Model({ url, wireframe, onStats }: { url: string; wireframe: boolean; onStats: (s: Stats) => void }) {
   const gltf = useLoader(GLTFLoader, url);
+  const camera = useThree((s) => s.camera);
+  const controls = useThree((s) => s.controls) as unknown as Controls | null;
 
-  // Center the model at the origin and auto-fit the camera
+  // Stand the model on the grid, scale it to SIDE, aim the camera, and remember that view for Reset.
   useEffect(() => {
-    if (gltf && gltf.scene && groupRef.current) {
-      try {
-        // Reset transforms before computing bounding box
-        groupRef.current.scale.setScalar(1);
-        groupRef.current.position.set(0, 0, 0);
+    const root = gltf.scene;
+    root.scale.setScalar(1);
+    root.position.set(0, 0, 0);
+    root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3());
+    const k = SIDE / Math.max(size.x, size.y, size.z);
+    const c = box.getCenter(new THREE.Vector3());
+    root.scale.setScalar(k);
+    root.position.set(-c.x * k, -box.min.y * k, -c.z * k);
 
-        const box = new THREE.Box3().setFromObject(groupRef.current);
-        const size = box.getSize(new THREE.Vector3());
-        const center = box.getCenter(new THREE.Vector3());
-        
-        // Center the model at the origin (no scaling needed — we move the camera instead)
-        groupRef.current.position.set(-center.x, -center.y, -center.z);
+    let tris = 0;
+    root.traverse((o) => {
+      const g = (o as THREE.Mesh).isMesh ? (o as THREE.Mesh).geometry : null;
+      if (g) tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    });
+    onStats({ url, w: size.x, d: size.z, h: size.y, tris });
 
-        // Auto-fit camera to the model's bounding sphere
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const fov = (camera as THREE.PerspectiveCamera).fov * (Math.PI / 180);
-        // Distance so the model fills ~80% of the viewport
-        const cameraDistance = (maxDim / 2) / Math.tan(fov / 2) * 1.25;
-        
-        // Position camera at an isometric-ish angle
-        const d = cameraDistance / Math.sqrt(3);
-        camera.position.set(d, d, d);
-        camera.lookAt(0, 0, 0);
-        camera.updateProjectionMatrix();
-        
-        console.log('Model fitted. Size:', size.x.toFixed(2), size.y.toFixed(2), size.z.toFixed(2), 'Camera distance:', cameraDistance.toFixed(2));
-        
-        if (onLoadSuccess) {
-          onLoadSuccess();
-        }
-      } catch (error) {
-        console.warn('Failed to fit model in viewport:', error);
-        if (onLoadSuccess) {
-          onLoadSuccess();
-        }
-      }
-    }
-  }, [gltf, onLoadSuccess, camera]);
+    // Back the camera off until the whole model fits the narrower of the two fields of view (phones are tall).
+    const h = size.y * k;
+    const cam = camera as THREE.PerspectiveCamera;
+    const vFov = THREE.MathUtils.degToRad(cam.fov);
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * cam.aspect);
+    const radius = size.clone().multiplyScalar(k / 2).length();
+    const dist = (radius / Math.sin(Math.min(vFov, hFov) / 2)) * 1.1; // a margin for the readout and tools
+    cam.position.copy(new THREE.Vector3(1, 0.7, 1).normalize().multiplyScalar(dist)).add(new THREE.Vector3(0, h / 2, 0));
+    if (controls) { controls.target.set(0, h / 2, 0); controls.update(); controls.saveState(); }
+  }, [gltf, url, camera, controls, onStats]);
 
-  if (!gltf || !gltf.scene) {
-    return null;
-  }
+  useEffect(() => {
+    gltf.scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (m) (Array.isArray(m) ? m : [m]).forEach((x) => { (x as THREE.MeshStandardMaterial).wireframe = wireframe; });
+    });
+  }, [gltf, wireframe]);
 
+  return <primitive object={gltf.scene} />;
+}
+
+class LoadGuard extends Component<{ children: ReactNode; onError: (e: Error) => void }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(e: Error) { this.props.onError(e); }
+  render() { return this.state.failed ? null : this.props.children; }
+}
+
+function Axo() {
   return (
-    <group ref={groupRef}>
-      <primitive object={gltf.scene} />
-    </group>
+    <svg className="axo" viewBox="0 0 120 120" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
+      <path d="M60 14 L104 38 L104 86 L60 110 L16 86 L16 38 Z" />
+      <path d="M16 38 L60 62 L104 38 M60 62 L60 110" />
+      <path className="hidden-edge" d="M60 14 L60 62" opacity="0.5" />
+      <line x1="10" y1="94" x2="54" y2="118" strokeWidth="0.8" />
+      <line x1="66" y1="118" x2="110" y2="94" strokeWidth="0.8" />
+    </svg>
   );
 }
 
-/**
- * Loading Fallback Component (rendered inside Canvas during Suspense)
- */
-function LoadingIndicator() {
-  return (
-    <mesh>
-      <boxGeometry args={[0.5, 0.5, 0.5]} />
-      <meshStandardMaterial color="#666" wireframe />
-    </mesh>
-  );
+/** "chair.jpg" -> "chair.glb"; a 500-character prompt -> its first 40 safe characters. */
+const fileName = (label: string) =>
+  `${label.replace(/\.(jpe?g|png|webp|glb)$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'model'}.glb`;
+
+export interface ViewerProps {
+  url: string | null;
+  name: string;
+  bytes?: number;
+  reference?: string;
+  busy: boolean;
+  onOpenSample: () => void;
+  onError: (message: string) => void;
 }
 
-/**
- * ModelViewer Component
- * 
- * Renders 3D models using React Three Fiber with interactive controls.
- * Provides lighting, camera configuration, and model display capabilities.
- * Includes performance monitoring to ensure smooth interactions (minimum 30 FPS).
- */
-export default function ModelViewer({ 
-  modelData, 
-  onLoadError, 
-  onLoadSuccess 
-}: ModelViewerProps) {
-  const controlsRef = useRef<any>(null);
-  const [isResetting, setIsResetting] = useState(false);
-  const { fps, showWarning } = usePerformanceMonitor();
-
-  // Default camera position and target
-  const defaultCameraPosition = new THREE.Vector3(3, 3, 3);
-  const defaultTarget = new THREE.Vector3(0, 0, 0);
-
-  /**
-   * Reset camera to default position with smooth transition
-   */
-  const handleResetView = () => {
-    if (!controlsRef.current) return;
-
-    setIsResetting(true);
-
-    const controls = controlsRef.current;
-    const camera = controls.object;
-
-    // Store initial positions
-    const startPosition = camera.position.clone();
-    const startTarget = controls.target.clone();
-
-    // Animation parameters
-    const duration = 1000; // 1 second
-    const startTime = Date.now();
-
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-
-      // Ease-out cubic for smooth deceleration
-      const easeProgress = 1 - Math.pow(1 - progress, 3);
-
-      // Interpolate camera position
-      camera.position.lerpVectors(startPosition, defaultCameraPosition, easeProgress);
-
-      // Interpolate target position
-      controls.target.lerpVectors(startTarget, defaultTarget, easeProgress);
-
-      controls.update();
-
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        setIsResetting(false);
-      }
-    };
-
-    animate();
-  };
+export default function ModelViewer({ url, name, bytes, reference, busy, onOpenSample, onError }: ViewerProps) {
+  const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [wire, setWire] = useState(false);
+  const [spin, setSpin] = useState(false);
+  const dark = useDark();
+  const shown = stats && stats.url === url ? stats : null;
+  const f = (n: number) => (n / Math.max(shown!.w, shown!.d, shown!.h)).toFixed(2); // proportions: generated models have no real-world scale
 
   return (
-    <div className="w-full h-[400px] sm:h-[500px] bg-gray-900 rounded-lg overflow-hidden relative">
-      {/* Performance warning banner */}
-      {showWarning && (
-        <div className="absolute top-4 left-4 z-10 bg-yellow-600 text-white px-4 py-2 rounded-md shadow-lg flex items-center gap-2">
-          <svg 
-            xmlns="http://www.w3.org/2000/svg" 
-            width="16" 
-            height="16" 
-            viewBox="0 0 24 24" 
-            fill="none" 
-            stroke="currentColor" 
-            strokeWidth="2" 
-            strokeLinecap="round" 
-            strokeLinejoin="round"
-          >
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-            <line x1="12" y1="9" x2="12" y2="13" />
-            <line x1="12" y1="17" x2="12.01" y2="17" />
-          </svg>
-          <span className="text-sm">Performance: {fps} FPS (below 30 FPS)</span>
+    <section className="view" aria-label="3D view">
+      {url && (
+        <Canvas dpr={[1, 2]} camera={{ fov: 40, position: [3.3, 2.9, 3.3] }}
+          onCreated={({ gl }) => { gl.toneMapping = THREE.NeutralToneMapping; }}>
+          <Studio />
+          <directionalLight position={[3, 5, 2]} intensity={0.8} />
+          <Grid infiniteGrid cellSize={0.25} sectionSize={1} cellThickness={0.6} sectionThickness={1}
+            cellColor={dark ? '#2f302b' : '#c9c2b2'} sectionColor={dark ? '#4a4a42' : '#a49c89'}
+            fadeDistance={14} fadeStrength={1.5} position={[0, -0.002, 0]} />
+          <LoadGuard key={url} onError={() => onError('That file could not be opened as a 3D model.')}>
+            <Suspense fallback={null}>
+              <Model url={url} wireframe={wire} onStats={setStats} />
+              <ContactShadows position={[0, 0, 0]} scale={5} blur={2.4} far={2.5} opacity={dark ? 0.6 : 0.4} resolution={256} />
+            </Suspense>
+          </LoadGuard>
+          <OrbitControls ref={controls} makeDefault enableDamping dampingFactor={0.08}
+            minDistance={1.2} maxDistance={14} autoRotate={spin} autoRotateSpeed={1.2} />
+        </Canvas>
+      )}
+
+      <span className="crop tl" /><span className="crop tr" /><span className="crop bl" /><span className="crop br" />
+      <p className="tag mono"><b>02</b> View · perspective</p>
+      {busy && url && <p className="busy-tag mono">Drawing a new model…</p>}
+
+      {!url && (
+        <div className={`empty ${busy ? 'drawing' : ''}`}>
+          <Axo />
+          {busy ? (
+            <>
+              <h2>On the drawing board</h2>
+              <p>The model appears here when the GPU sends it back.</p>
+            </>
+          ) : (
+            <>
+              <h2>Nothing on the sheet yet</h2>
+              <p>Add a photo or describe an object, then press Generate.</p>
+              <button type="button" className="linkish" onClick={onOpenSample}>Or open the sample mug, made earlier</button>
+            </>
+          )}
         </div>
       )}
 
-      {/* FPS counter (always visible during development) */}
-      <div className="absolute bottom-4 left-4 z-10 bg-gray-800 bg-opacity-75 text-white px-3 py-1 rounded-md text-xs font-mono">
-        {fps} FPS
-      </div>
+      {url && !shown && <p className="reading mono">Reading model…</p>}
 
-      {/* Reset button */}
-      <button
-        onClick={handleResetView}
-        disabled={isResetting}
-        className="absolute top-4 right-4 z-10 bg-gray-800 hover:bg-gray-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-md shadow-lg transition-colors duration-200 flex items-center gap-2"
-        aria-label="Reset camera view to default position"
-      >
-        <svg 
-          xmlns="http://www.w3.org/2000/svg" 
-          width="16" 
-          height="16" 
-          viewBox="0 0 24 24" 
-          fill="none" 
-          stroke="currentColor" 
-          strokeWidth="2" 
-          strokeLinecap="round" 
-          strokeLinejoin="round"
-        >
-          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-          <path d="M21 3v5h-5" />
-          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-          <path d="M3 21v-5h5" />
-        </svg>
-        Reset View
-      </button>
+      {reference && url && (
+        <figure className="ref">
+          {/* eslint-disable-next-line @next/next/no-img-element -- local object URL */}
+          <img src={reference} alt="The source photo" />
+          <figcaption className="mono">Source</figcaption>
+        </figure>
+      )}
 
-      <Canvas
-        style={{ width: '100%', height: '100%' }}
-        camera={{
-          position: [3, 3, 3],
-          fov: 45,
-        }}
-        dpr={[1, 2]} // Adaptive pixel ratio for performance
-        performance={{ min: 0.5 }} // Allow quality reduction if needed
-      >
-        {/* Hemisphere light for natural sky/ground ambient */}
-        <hemisphereLight
-          args={['#b1e1ff', '#b97a20', 0.6]}
-        />
-        
-        {/* Ambient light for baseline illumination */}
-        <ambientLight intensity={0.8} />
-        
-        {/* Key light - main directional light from upper-right */}
-        <directionalLight 
-          intensity={1.5} 
-          position={[5, 8, 5]} 
-        />
-        
-        {/* Fill light - softer light from opposite side to reduce harsh shadows */}
-        <directionalLight 
-          intensity={0.6} 
-          position={[-5, 3, -3]} 
-        />
-        
-        {/* Rim light - back light for edge definition */}
-        <directionalLight 
-          intensity={0.4} 
-          position={[0, -2, -5]} 
-        />
-        
-        {/* Interactive controls for rotation, zoom, and pan */}
-        <OrbitControls
-          ref={controlsRef}
-          enableDamping={true}
-          dampingFactor={0.05}
-          minDistance={0.5}
-          maxDistance={30}
-          mouseButtons={{
-            LEFT: THREE.MOUSE.ROTATE,
-            MIDDLE: THREE.MOUSE.DOLLY,
-            RIGHT: THREE.MOUSE.PAN,
-          }}
-          touches={{
-            ONE: THREE.TOUCH.ROTATE,
-            TWO: THREE.TOUCH.DOLLY_PAN,
-          }}
-        />
-        
-        {/* Render GLB model with Suspense fallback and error boundary */}
-        {modelData && (
-          <CanvasErrorBoundary onError={onLoadError}>
-            <Suspense fallback={<LoadingIndicator />}>
-              <Model 
-                url={modelData} 
-                onLoadSuccess={onLoadSuccess}
-              />
-            </Suspense>
-          </CanvasErrorBoundary>
-        )}
-      </Canvas>
-    </div>
+      {url && shown && (
+        <>
+          <div className="readout num">
+            <span className="dims"><span>W</span>{f(shown.w)} <span>D</span>{f(shown.d)} <span>H</span>{f(shown.h)} <span>relative</span></span>
+            <span>{Math.round(shown.tris).toLocaleString('en-US')} triangles{bytes ? ` · ${(bytes / 1024 / 1024).toFixed(1)} MB` : ''}</span>
+          </div>
+          <div className="tools">
+            <button type="button" onClick={() => controls.current?.reset()}>Reset view</button>
+            <button type="button" aria-pressed={spin} onClick={() => setSpin(!spin)}>Turntable</button>
+            <button type="button" className="wide" aria-pressed={wire} onClick={() => setWire(!wire)}>Wireframe</button>
+            <a href={url} download={fileName(name)}>Download .glb</a>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
