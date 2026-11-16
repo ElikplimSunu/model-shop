@@ -38,7 +38,7 @@ export function wallsOf(level: Level): Wall[] {
   return [...outer, ...inner].map((w) => ({ ...w, length: len(w.from, w.to) }));
 }
 
-/** Outside size in metres: plan extents of the centrelines plus one wall thickness, and total height. */
+/** Outside size in metres: plan extents of the centrelines plus one wall thickness; height from the ground to the top of the roof slab. */
 export function extents(b: Building) {
   const pts = b.levels.flatMap((l) => l.outline);
   const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
@@ -47,7 +47,7 @@ export function extents(b: Building) {
     minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys),
     width: Math.max(...xs) - Math.min(...xs) + b.wallThickness,
     depth: Math.max(...ys) - Math.min(...ys) + b.wallThickness,
-    height: b.levels.reduce((h, l) => h + l.height, 0) + slab * (b.levels.length - 1),
+    height: b.levels.reduce((h, l) => h + l.height, 0) + slab * b.levels.length, // floors between levels, plus the roof
   };
 }
 

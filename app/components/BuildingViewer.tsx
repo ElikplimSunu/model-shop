@@ -108,7 +108,7 @@ export default function BuildingViewer({ b }: { b: Building }) {
       <p className="tag mono"><b>02</b> View · true scale, metres</p>
 
       <div className="readout num">
-        <span className="dims"><span>W</span>{e.width.toFixed(2)} <span>D</span>{e.depth.toFixed(2)} <span>H</span>{e.height.toFixed(2)} <span>m, outside</span></span>
+        <span className="dims"><span>W</span>{e.width.toFixed(2)} <span>D</span>{e.depth.toFixed(2)} <span>H</span>{e.height.toFixed(2)} <span>m outside, ground to roof top</span></span>
         <span>grid: 1 m squares, heavier line every 5 m</span>
       </div>
       <div className="tools">

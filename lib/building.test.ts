@@ -1,7 +1,7 @@
 // pnpm exec vitest run lib/building.test.ts
 // Measures the built pieces, not the spec: the 3D shell must come out exactly as the numbers say.
 import { describe, expect, it } from 'vitest';
-import { area, pieces, problems, SAMPLES, type Piece } from './building';
+import { area, extents, pieces, problems, SAMPLES, type Piece } from './building';
 
 type Box = Extract<Piece, { kind: 'wall' | 'glass' }>;
 
@@ -40,6 +40,7 @@ describe('building from numbers', () => {
     const onWall0 = pieces(studio).filter((p): p is Box => p.kind === 'wall' && Math.abs(p.center[2]) < 1e-9);
     const lowSolids = onWall0.filter((b) => b.center[1] - b.size[1] / 2 < 1e-9); // pieces that reach the floor
     const spans = lowSolids.map((b) => [b.center[0] - b.size[0] / 2, b.center[0] + b.size[0] / 2]).sort((a, z) => a[0] - z[0]);
+    near(spans[0][0], -0.1); // wall 0 starts half a wall thickness before its corner, so the corner is filled
     near(spans[0][1], 1); // solid wall ends where the door starts
     near(spans[1][0], 1.9); // and starts again 0.9 m later
     const lintel = onWall0.find((b) => Math.abs(b.center[0] - 1.45) < 1e-9)!;
@@ -52,10 +53,27 @@ describe('building from numbers', () => {
     for (const g of glass) { near(g.center[1] - g.size[1] / 2, 0.9); near(g.size[1], 1.2); near(g.size[0], 1.8); }
   });
 
+  it('fills every corner: each wall runs half a thickness past both of its corners', () => {
+    // a corner gap would show as a wall whose plan length is less than its centreline length plus one thickness
+    const walls = pieces(studio).filter((p): p is Box => p.kind === 'wall' && p.center[1] - p.size[1] / 2 < 1e-9 && p.size[1] > 2.6);
+    const run = (z: number) => walls.filter((w) => Math.abs(w.center[2] - z) < 1e-9 && Math.abs(Math.sin(w.rotY)) < 1e-9)
+      .flatMap((w) => [w.center[0] - w.size[0] / 2, w.center[0] + w.size[0] / 2]);
+    near(Math.min(...run(-4)), -0.1); // wall 2 (top edge, running right to left) reaches past x = 0
+    near(Math.max(...run(-4)), 6.1);
+  });
+
   it('stacks levels with a slab between them', () => {
     const house = SAMPLES[2];
     const { size } = bounds(pieces(house).filter((p): p is Box => p.kind === 'wall'));
     near(size[1], 3 + 0.2 + 2.8);
+  });
+
+  it('reports the outside height up to the top of the roof', () => {
+    for (const b of SAMPLES) {
+      const roof = pieces(b).find((p) => p.kind === 'slab' && p.roof) as Extract<Piece, { kind: 'slab' }>;
+      near(extents(b).height, roof.y + roof.thickness);
+    }
+    near(extents(studio).height, 2.9); // 2.7 m room plus a 0.2 m roof slab
   });
 
   it('measures floor area inside the centrelines', () => {
