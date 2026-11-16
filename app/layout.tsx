@@ -8,7 +8,7 @@ const mono = IBM_Plex_Mono({ variable: "--font-mono", subsets: ["latin"], weight
 const display = Instrument_Serif({ variable: "--font-display", subsets: ["latin"], weight: "400", style: ["normal", "italic"] });
 
 export const metadata: Metadata = {
-  title: "Model Shop",
+  title: { template: "%s · Model Shop", default: "Model Shop" }, // pages set their own name; the home page is the site name alone
   description: "Turn a photo or a description into a 3D model you can turn, inspect and download.",
 };
 
