@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local handoff notes and demo files
+WORKLOG.md
+WORKLOG-archive.md
+LEARNINGS.md
+handoff/
+demo/
+
+# python bytecode from the Modal scripts
+__pycache__/
