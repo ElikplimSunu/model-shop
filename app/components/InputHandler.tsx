@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react';
 import type { GenerationInput } from '@/types/3d-model';
 
+export type Quality = 'draft' | 'high';
+
 interface InputHandlerProps {
-  onSubmit: (input: GenerationInput) => Promise<void>;
+  onSubmit: (input: GenerationInput, quality: Quality) => Promise<void>;
   isLoading: boolean;
 }
 
@@ -28,6 +30,11 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
   const [text, setText] = useState('');
   const [problem, setProblem] = useState<string | null>(null);
   const [over, setOver] = useState(false);
+  const [quality, setQuality] = useState<Quality>('draft');
+  // Words become a picture first (TRELLIS's text model drops style and material words), and the
+  // person checks the picture before any GPU time is spent on the 3D step.
+  const [picture, setPicture] = useState<string | null>(null);
+  const [drawing, setDrawing] = useState(false);
 
   // the page keeps its own copy of the preview for the run log, so this one can go when it changes
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
@@ -41,11 +48,24 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
     setPreview(URL.createObjectURL(f));
   };
 
+  const makePicture = async () => {
+    if (!text.trim()) return setProblem('Describe the object first.');
+    setDrawing(true); setProblem(null); setPicture(null);
+    const r = await fetch('/api/generate-image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text.trim() }),
+    }).then((res) => res.json()).catch(() => null);
+    setDrawing(false);
+    if (!r?.success) return setProblem(r?.error?.message ?? 'Lost the connection to the server.');
+    setPicture(r.image);
+  };
+
+  const editText = (t: string) => { setText(t); setProblem(null); setPicture(null); }; // an old picture no longer matches
+
   const submit = async () => {
-    if (isLoading) return;
+    if (isLoading || drawing) return;
     if (mode === 'text') {
-      if (!text.trim()) return setProblem('Describe the object first.');
-      return onSubmit({ type: 'text', data: text.trim() });
+      if (!picture) return makePicture();
+      return onSubmit({ type: 'image', data: picture, preview: `data:image/jpeg;base64,${picture}`, name: text.trim(), fromText: true }, quality);
     }
     if (!file) return setProblem('Add a photo first.');
     const data = await new Promise<string>((resolve, reject) => {
@@ -56,10 +76,11 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
     }).catch(() => null);
     if (!data) return setProblem('Could not read that photo. Try another one.');
     // a fresh URL for the log, because this component revokes its own when the photo changes
-    await onSubmit({ type: 'image', data, preview: URL.createObjectURL(file), name: file.name });
+    await onSubmit({ type: 'image', data, preview: URL.createObjectURL(file), name: file.name }, quality);
   };
 
   const ready = mode === 'text' ? text.trim().length > 0 : !!file;
+  const label = isLoading ? 'Generating…' : mode === 'text' && !picture ? (drawing ? 'Drawing the picture…' : 'Make picture') : 'Generate model';
 
   return (
     <div className="block">
@@ -67,7 +88,7 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
 
       <div className="tabs" role="tablist">
         {(['image', 'text'] as const).map((m) => (
-          <button key={m} role="tab" aria-selected={mode === m} disabled={isLoading}
+          <button key={m} role="tab" aria-selected={mode === m} disabled={isLoading || drawing}
             onClick={() => { setMode(m); setProblem(null); }}>
             {m === 'image' ? 'From a photo' : 'From a description'}
           </button>
@@ -99,27 +120,58 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
         </>
       ) : (
         <>
-          <textarea className="prompt" value={text} maxLength={MAX_TEXT} disabled={isLoading}
+          <textarea className="prompt" value={text} maxLength={MAX_TEXT} disabled={isLoading || drawing}
             placeholder="A small stone chapel with a slate roof and one arched wooden door"
-            onChange={(e) => { setText(e.target.value); setProblem(null); }}
+            onChange={(e) => editText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }} />
           <div className="count mono"><span>Describe one object</span><span>{text.length} / {MAX_TEXT}</span></div>
-          <ul className="examples">
-            {EXAMPLES.map((ex, i) => (
-              <li key={ex}>
-                <button type="button" disabled={isLoading} onClick={() => { setText(ex); setProblem(null); }}>
-                  <span>{String(i + 1).padStart(2, '0')}</span>{ex}
-                </button>
-              </li>
-            ))}
-          </ul>
+          {picture || drawing ? (
+            <>
+              <div className="drop still" aria-live="polite">
+                {drawing ? (
+                  <><strong>Drawing the picture…</strong><small className="mono">FLUX on NVIDIA · usually under 30 s</small></>
+                ) : (
+                  <>
+                    {/* eslint-disable-next-line @next/next/no-img-element -- base64 from our own API */}
+                    <img src={`data:image/jpeg;base64,${picture}`} alt="The picture made from your description" />
+                    <span className="caption mono">Does it match your words? Then make it 3D.</span>
+                  </>
+                )}
+              </div>
+              {picture && !drawing && (
+                <p className="hint"><button type="button" className="linkish" disabled={isLoading} onClick={makePicture}>Try another picture</button> · free, a few seconds</p>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="hint">Your words become a picture first. You check it, then it becomes 3D.</p>
+              <ul className="examples">
+                {EXAMPLES.map((ex, i) => (
+                  <li key={ex}>
+                    <button type="button" disabled={isLoading} onClick={() => editText(ex)}>
+                      <span>{String(i + 1).padStart(2, '0')}</span>{ex}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </>
       )}
 
       {problem && <div className="err" role="alert" style={{ marginTop: 14 }}><p>{problem}</p></div>}
 
-      <button type="button" className="go" disabled={!ready || isLoading} onClick={submit}>
-        {isLoading ? 'Generating…' : 'Generate model'}
+      <div className="quality" role="radiogroup" aria-label="Detail">
+        {(['draft', 'high'] as const).map((q) => (
+          <button key={q} type="button" role="radio" aria-checked={quality === q} disabled={isLoading} onClick={() => setQuality(q)}>
+            {q === 'draft' ? 'Draft' : 'High'}
+          </button>
+        ))}
+        <span className="mono">{quality === 'high' ? 'finer detail · about 3× the time and file size' : 'the usual detail'}</span>
+      </div>
+
+      <button type="button" className="go" disabled={!ready || isLoading || drawing} onClick={submit}>
+        {label}
         <kbd>{mode === 'text' ? '⌘ ↵' : '→'}</kbd>
       </button>
     </div>

@@ -2,13 +2,15 @@
 
 // Input types
 export type GenerationInput = 
-  | { type: 'image'; data: string; preview?: string; name?: string }
+  // fromText: the picture was made from a description (the words are in name)
+  | { type: 'image'; data: string; preview?: string; name?: string; fromText?: boolean }
   | { type: 'text'; data: string };
 
 // API Request/Response types
 export interface GenerateModelRequest {
   type: 'image' | 'text';
   data: string; // base64 image or text prompt
+  quality?: 'draft' | 'high'; // photos on Modal only
 }
 
 export interface GenerateModelResponse {

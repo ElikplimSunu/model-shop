@@ -177,7 +177,8 @@ export async function POST(request: NextRequest) {
       const modalUrl = process.env.MODAL_TRELLIS_URL;
       if (modalUrl) {
         console.log('Sending Image-to-3D request to Modal TRELLIS.2...');
-        const modalResponse = await fetch(modalUrl, {
+        // High: TRELLIS.2's finest pass, about 3x the time and file size (see QUALITY in trellis_modal.py)
+        const modalResponse = await fetch(body.quality === 'high' ? `${modalUrl}?quality=high` : modalUrl, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${process.env.MODAL_TRELLIS_KEY}`,
