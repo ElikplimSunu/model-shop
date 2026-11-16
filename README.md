@@ -4,7 +4,7 @@ Turn a photo or a short description into a 3D model you can turn, inspect and do
 Model Shop runs Microsoft's TRELLIS.2 on your own rented GPU (it reads the photo with Meta's DINOv3).
 A description first becomes a picture (FLUX, hosted by NVIDIA), which you check before the GPU starts.
 
-![Model Shop: a photo on the left, the 3D model on a drafting grid in the middle, the run log on the right](docs/model-shop.png)
+![Model Shop's Objects page: the source panel with the model picker on the left, a TRELLIS.2 mug made from its photo on a drafting grid in the middle, the run log on the right](docs/model-shop.png)
 
 ## What it does
 
