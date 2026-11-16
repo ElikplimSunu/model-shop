@@ -2,7 +2,7 @@
 
 // Input types
 export type GenerationInput = 
-  | { type: 'image'; data: string; preview?: string }
+  | { type: 'image'; data: string; preview?: string; name?: string }
   | { type: 'text'; data: string };
 
 // API Request/Response types

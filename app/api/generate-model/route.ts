@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { GenerateModelRequest, GenerateModelResponse } from '@/types/3d-model';
+import { Client } from "@gradio/client";
 
 // Disable caching for this dynamic route
 export const dynamic = 'force-dynamic';
@@ -7,30 +8,16 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/generate-model
  * 
- * Handles 3D model generation requests by forwarding them to NVIDIA Trellis API.
- * Validates input, authenticates with Bearer token, and returns model data or errors.
- * 
- * Requirements: 4.1, 4.3, 4.4, 5.1, 5.2, 5.3, 5.4
+ * Handles 3D model generation requests.
+ * Hybrid approach:
+ * - Text-to-3D: Forwards to NVIDIA Trellis API.
+ * - Image-to-3D: Uses Hugging Face microsoft/TRELLIS.2 via Gradio client.
  */
 export async function POST(request: NextRequest) {
   try {
-    // Requirement 4.1: Authenticate using NVIDIA_API_KEY from environment
     const apiKey = process.env.NVIDIA_API_KEY;
+    const hfToken = process.env.HF_TOKEN;
     
-    // Requirement 4.2: Return configuration error if API key is missing
-    if (!apiKey || apiKey === 'your_nvidia_api_key_here') {
-      return NextResponse.json<GenerateModelResponse>(
-        {
-          success: false,
-          error: {
-            code: 'CONFIGURATION_ERROR',
-            message: 'NVIDIA API key is not configured. Please set NVIDIA_API_KEY in your environment variables.',
-          },
-        },
-        { status: 500 }
-      );
-    }
-
     // Parse and validate request body
     let body: GenerateModelRequest;
     try {
@@ -62,38 +49,63 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate input type
-    if (body.type !== 'image' && body.type !== 'text') {
-      return NextResponse.json<GenerateModelResponse>(
-        {
-          success: false,
-          error: {
-            code: 'INVALID_INPUT_TYPE',
-            message: 'Input type must be "image" or "text".',
-          },
-        },
-        { status: 400 }
-      );
-    }
-
-    // Validate data is not empty
-    if (!body.data.trim()) {
-      return NextResponse.json<GenerateModelResponse>(
-        {
-          success: false,
-          error: {
-            code: 'EMPTY_INPUT',
-            message: 'Input data cannot be empty',
-          },
-        },
-        { status: 400 }
-      );
-    }
-
-    let trellisRequest: any;
-
+    // --- CASE: TEXT-TO-3D (NVIDIA NIM) ---
     if (body.type === 'text') {
-      trellisRequest = {
+      // Own TRELLIS text model on Modal (trellis1_modal.py) when configured; NVIDIA otherwise.
+      const modalTextUrl = process.env.MODAL_TEXT_URL;
+      if (modalTextUrl && body.data.trim()) {
+        console.log('Sending Text-to-3D request to Modal TRELLIS...');
+        const modalResponse = await fetch(modalTextUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.MODAL_TRELLIS_KEY}`,
+            'Content-Type': 'text/plain; charset=utf-8',
+          },
+          body: body.data.trim(),
+        });
+        if (!modalResponse.ok) {
+          const detail = await modalResponse.text().catch(() => '');
+          return NextResponse.json<GenerateModelResponse>(
+            {
+              success: false,
+              error: { code: 'API_ERROR', message: `Modal TRELLIS text failed with status ${modalResponse.status}: ${detail.slice(0, 200)}` },
+            },
+            { status: 502 }
+          );
+        }
+        return NextResponse.json<GenerateModelResponse>({
+          success: true,
+          model: { data: Buffer.from(await modalResponse.arrayBuffer()).toString('base64'), format: 'glb' },
+        });
+      }
+
+      if (!apiKey || apiKey === 'your_nvidia_api_key_here') {
+        return NextResponse.json<GenerateModelResponse>(
+          {
+            success: false,
+            error: {
+              code: 'CONFIGURATION_ERROR',
+              message: 'NVIDIA API key is not configured for Text-to-3D.',
+            },
+          },
+          { status: 500 }
+        );
+      }
+
+      if (!body.data.trim()) {
+        return NextResponse.json<GenerateModelResponse>(
+          {
+            success: false,
+            error: {
+              code: 'EMPTY_INPUT',
+              message: 'Text prompt cannot be empty',
+            },
+          },
+          { status: 400 }
+        );
+      }
+
+      const trellisRequest = {
         prompt: body.data,
         mode: 'text',
         output_format: 'glb',
@@ -103,58 +115,10 @@ export async function POST(request: NextRequest) {
         ss_sampling_steps: 25,
         seed: 0,
       };
-    } else {
-      let imageData = body.data;
-      let imagePayload = imageData;
 
-      // Handle correct prefixing for base64 images
-      if (!imageData.startsWith('data:')) {
-        let mimeType = 'image/png'; // default
-        if (imageData.startsWith('/9j/')) {
-          mimeType = 'image/jpeg';
-        } else if (imageData.startsWith('iVBORw0KGgo')) {
-          mimeType = 'image/png';
-        } else if (imageData.startsWith('UklGR')) {
-          mimeType = 'image/webp';
-        }
-        imagePayload = `data:${mimeType};base64,${imageData}`;
-      } else if (imageData.includes(';base64,')) {
-        // Only normalize if it's explicitly marked as base64
-        imagePayload = imageData.replace(/;[^,]*,/, ';base64,');
-      }
-      // If it contains example_id, we leave it exactly as is
-
-      trellisRequest = {
-        image: imagePayload,
-        mode: 'image',
-        output_format: 'glb',
-        slat_cfg_scale: 3,
-        ss_cfg_scale: 7.5,
-        slat_sampling_steps: 25,
-        ss_sampling_steps: 25,
-        seed: 0,
-      };
-    }
-
-    console.log('Sending request to NVIDIA Trellis API...');
-    console.log('Request parameters:', {
-      mode: trellisRequest.mode,
-      slat_cfg_scale: trellisRequest.slat_cfg_scale,
-      ss_cfg_scale: trellisRequest.ss_cfg_scale,
-      slat_sampling_steps: trellisRequest.slat_sampling_steps,
-      ss_sampling_steps: trellisRequest.ss_sampling_steps,
-      seed: trellisRequest.seed,
-      hasImage: !!trellisRequest.image,
-      hasText: !!trellisRequest.prompt,
-      imagePrefix: trellisRequest.image ? trellisRequest.image.substring(0, 50) + '...' : 'N/A',
-    });
-
-    // Requirement 5.4: Send request to NVIDIA Trellis API endpoint
-    // Requirement 4.3: Include Bearer token in Authorization header
-    // Requirement 6.3: Handle timeouts with 60s timeout
-    let trellisResponse;
-    try {
-      trellisResponse = await fetch(
+      console.log('Sending Text-to-3D request to NVIDIA Trellis API...');
+      
+      const trellisResponse = await fetch(
         'https://ai.api.nvidia.com/v1/genai/microsoft/trellis',
         {
           method: 'POST',
@@ -164,217 +128,183 @@ export async function POST(request: NextRequest) {
             'Accept': 'application/json',
           },
           body: JSON.stringify(trellisRequest),
-          // Removed manual timeout to allow for longer generation times
         }
       );
-    } catch (fetchError) {
-      // Requirement 6.3: Handle timeout errors
-      if (fetchError instanceof Error && fetchError.name === 'TimeoutError') {
-        console.error('API request timeout:', fetchError);
+
+      if (!trellisResponse.ok) {
+        const errorData = await trellisResponse.json().catch(() => ({}));
         return NextResponse.json<GenerateModelResponse>(
           {
             success: false,
             error: {
-              code: 'TIMEOUT_ERROR',
-              message: 'The request to generate the 3D model timed out after 60 seconds. Please try again.',
+              code: 'API_ERROR',
+              message: errorData.error?.message || `NVIDIA API request failed with status ${trellisResponse.status}`,
             },
           },
-          { status: 408 }
+          { status: trellisResponse.status }
         );
       }
 
-      // Requirement 6.4: Handle network errors
-      if (fetchError instanceof Error && (fetchError.name === 'TypeError' || fetchError.message.includes('fetch'))) {
-        console.error('Network error:', fetchError);
-        return NextResponse.json<GenerateModelResponse>(
-          {
-            success: false,
-            error: {
-              code: 'NETWORK_ERROR',
-              message: 'Unable to connect to the 3D model generation service. Please check your internet connection and try again.',
-            },
-          },
-          { status: 503 }
-        );
+      const responseData = await trellisResponse.json();
+      const modelData = responseData.artifacts?.[0]?.base64 || responseData.model?.data;
+
+      if (modelData) {
+        return NextResponse.json<GenerateModelResponse>({
+          success: true,
+          model: { data: modelData, format: 'glb' },
+        });
       }
 
-      // Requirement 6.5: Log other fetch errors
-      console.error('Fetch error:', fetchError);
-      throw fetchError;
-    }
-
-    // Requirement 6.2: Handle API error responses with descriptive messages
-    if (!trellisResponse.ok) {
-      let errorData;
-      try {
-        errorData = await trellisResponse.json();
-      } catch {
-        errorData = {};
-      }
-
-      // Requirement 4.2: Handle authentication errors specifically
-      if (trellisResponse.status === 401 || trellisResponse.status === 403) {
-        console.error('Authentication error:', trellisResponse.status, errorData);
-        return NextResponse.json<GenerateModelResponse>(
-          {
-            success: false,
-            error: {
-              code: 'AUTHENTICATION_ERROR',
-              message: 'Invalid or expired API key. Please verify your NVIDIA API key configuration.',
-            },
-          },
-          { status: 401 }
-        );
-      }
-
-      // Handle rate limiting
-      if (trellisResponse.status === 429) {
-        console.error('Rate limit exceeded:', errorData);
-        return NextResponse.json<GenerateModelResponse>(
-          {
-            success: false,
-            error: {
-              code: 'RATE_LIMIT_ERROR',
-              message: 'Too many requests. Please wait a moment and try again.',
-            },
-          },
-          { status: 429 }
-        );
-      }
-
-      if (trellisResponse.status === 400 || trellisResponse.status === 422) {
-        console.error('Bad request error:', trellisResponse.status, errorData);
-        console.error('Request that was sent:', JSON.stringify(trellisRequest, null, 2));
-
-        let message = errorData.error?.message || errorData.detail;
-        
-        // Specific handling for Preview API example_id requirement
-        if (typeof message === 'string' && message.includes('example_id')) {
-          message = 'The Preview API currently only supports predefined example images. Please use one of the example image IDs (0-3).';
-        } else if (Array.isArray(message)) {
-          // Handle FastAPI style detail arrays
-          const detailMsg = message.map(m => m.msg || JSON.stringify(m)).join(', ');
-          if (detailMsg.includes('example_id')) {
-            message = 'The Preview API currently only supports predefined example images. Please use one of the example image IDs (0-3).';
-          } else {
-            message = detailMsg;
-          }
-        }
-
-        return NextResponse.json<GenerateModelResponse>(
-          {
-            success: false,
-            error: {
-              code: 'INVALID_REQUEST',
-              message: message || 'The request was invalid. Please check your input and try again.',
-            },
-          },
-          { status: 400 }
-        );
-      }
-
-      // Handle server errors
-      if (trellisResponse.status >= 500) {
-        console.error('Server error:', trellisResponse.status, errorData);
-        return NextResponse.json<GenerateModelResponse>(
-          {
-            success: false,
-            error: {
-              code: 'SERVER_ERROR',
-              message: 'The 3D model generation service is currently unavailable. Please try again later.',
-            },
-          },
-          { status: 503 }
-        );
-      }
-
-      // Requirement 6.5: Log API errors for debugging
-      console.error('API error:', trellisResponse.status, errorData);
       return NextResponse.json<GenerateModelResponse>(
         {
           success: false,
-          error: {
-            code: 'API_ERROR',
-            message: errorData.error?.message || `API request failed with status ${trellisResponse.status}`,
-          },
-        },
-        { status: trellisResponse.status }
-      );
-    }
-
-    // Requirement 6.1: Parse and return GLB model data from response
-    let responseData;
-    let rawResponseText;
-    try {
-      rawResponseText = await trellisResponse.text();
-      console.log('Raw API response (first 500 chars):', rawResponseText.substring(0, 500));
-      responseData = JSON.parse(rawResponseText);
-    } catch (parseError) {
-      console.error('Failed to parse API response:', parseError);
-      console.error('Raw response was:', rawResponseText?.substring(0, 200));
-      return NextResponse.json<GenerateModelResponse>(
-        {
-          success: false,
-          error: {
-            code: 'INVALID_RESPONSE',
-            message: 'Received an invalid response from the 3D model generation service.',
-          },
+          error: { code: 'INVALID_RESPONSE', message: 'NVIDIA API did not contain model data' },
         },
         { status: 500 }
       );
     }
 
-    // Diagnostic logging to understand the response structure
-    console.log('API response keys:', Object.keys(responseData));
-    if (responseData.artifacts) {
-      console.log('artifacts length:', responseData.artifacts.length);
-      if (responseData.artifacts[0]) {
-        console.log('artifacts[0] keys:', Object.keys(responseData.artifacts[0]));
-        console.log('artifacts[0].base64 length:', responseData.artifacts[0].base64?.length || 'N/A');
-        console.log('artifacts[0].base64 prefix:', responseData.artifacts[0].base64?.substring(0, 50) || 'N/A');
+    if (body.type === 'image') {
+      // Prepare image bytes from base64
+      let imageData = body.data;
+      if (imageData.includes(';base64,')) {
+        imageData = imageData.split(',')[1];
       }
-    }
-    if (responseData.model) {
-      console.log('model keys:', Object.keys(responseData.model));
-    }
+      const buffer = Buffer.from(imageData, 'base64');
 
-    // Requirement 6.1: Extract and return the 3D model data
-    // The API might return data in artifacts[0].base64 or model.data
-    const modelData = responseData.artifacts?.[0]?.base64 || responseData.model?.data;
+      // Own TRELLIS.2 on Modal (trellis_modal.py) when configured; HF Space otherwise.
+      // Modal answers long jobs with a 303 to a result URL, which fetch follows on its own.
+      const modalUrl = process.env.MODAL_TRELLIS_URL;
+      if (modalUrl) {
+        console.log('Sending Image-to-3D request to Modal TRELLIS.2...');
+        const modalResponse = await fetch(modalUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.MODAL_TRELLIS_KEY}`,
+            'Content-Type': 'application/octet-stream',
+          },
+          body: buffer,
+        });
+        if (!modalResponse.ok) {
+          const detail = await modalResponse.text().catch(() => '');
+          return NextResponse.json<GenerateModelResponse>(
+            {
+              success: false,
+              error: { code: 'API_ERROR', message: `Modal TRELLIS.2 failed with status ${modalResponse.status}: ${detail.slice(0, 200)}` },
+            },
+            { status: 502 }
+          );
+        }
+        return NextResponse.json<GenerateModelResponse>({
+          success: true,
+          model: { data: Buffer.from(await modalResponse.arrayBuffer()).toString('base64'), format: 'glb' },
+        });
+      }
 
-    if (modelData) {
+      console.log('Connecting to Hugging Face TRELLIS.2 Space...');
+
+      // Connect with token if available, otherwise anonymous
+      const hfToken = process.env.HF_TOKEN;
+      const client = await Client.connect("microsoft/TRELLIS.2", hfToken ? {
+        token: hfToken as `hf_${string}`,
+      } : {});
+
+      const blob = new Blob([buffer], { type: 'image/png' });
+
+      console.log('Step 1: Preprocessing Image...');
+      await client.predict("/preprocess_image", { input: blob });
+
+      console.log('Step 2: Getting Seed...');
+      const seedResult = await client.predict("/get_seed", { 
+        randomize_seed: true, 
+        seed: 0 
+      });
+      const seed = (seedResult.data as number[])[0];
+
+      console.log(`Step 3: Generating 3D Model (Seed: ${seed})...`);
+      // Calling image_to_3d generates the state internally in the session
+      await client.predict("/image_to_3d", { 
+        image: blob,
+        seed: seed,
+        resolution: "1024",
+        ss_guidance_strength: 7.5,
+        ss_guidance_rescale: 0.7,
+        ss_sampling_steps: 12,
+        ss_rescale_t: 5,
+        shape_slat_guidance_strength: 7.5,
+        shape_slat_guidance_rescale: 0.5,
+        shape_slat_sampling_steps: 12,
+        shape_slat_rescale_t: 3,
+        tex_slat_guidance_strength: 1,
+        tex_slat_guidance_rescale: 0,
+        tex_slat_sampling_steps: 12,
+        tex_slat_rescale_t: 3,
+      });
+
+      console.log('Step 4: Extracting GLB...');
+      const extractResult = await client.predict("/extract_glb", { 
+        decimation_target: 300000, 
+        texture_size: 2048, 
+      });
+
+      // extractResult.data[0] is the Model3D output object which contains the file URL
+      const modelOutput = (extractResult.data as { url: string; path: string }[])[0];
+      if (!modelOutput || !modelOutput.url) {
+        throw new Error("Failed to extract GLB: No output URL found");
+      }
+
+      console.log('Step 5: Fetching GLB and converting to base64...');
+      const glbResponse = await fetch(modelOutput.url);
+      if (!glbResponse.ok) throw new Error("Failed to download generated GLB");
+      
+      const glbBuffer = await glbResponse.arrayBuffer();
+      const base64Glb = Buffer.from(glbBuffer).toString('base64');
+
       return NextResponse.json<GenerateModelResponse>({
         success: true,
         model: {
-          data: modelData,
+          data: base64Glb,
           format: 'glb',
         },
       });
     }
 
-    // Handle unexpected response format
-    console.error('API response missing model data:', responseData);
     return NextResponse.json<GenerateModelResponse>(
       {
         success: false,
-        error: {
-          code: 'INVALID_RESPONSE',
-          message: 'API response did not contain model data',
-        },
+        error: { code: 'INVALID_INPUT_TYPE', message: 'Unsupported input type.' },
       },
-      { status: 500 }
+      { status: 400 }
     );
 
-  } catch (error) {
-    // Requirement 6.5: Log unexpected errors for debugging
-    console.error('Unexpected error in generate-model route:', error);
+  } catch (err: any) {
+    console.error('Unexpected error in generate-model route:', err);
     
+    let message = 'An unexpected error occurred while processing your request';
+    let code = 'INTERNAL_ERROR';
+
+    // Safely extract message from different error formats (standard Error, Gradio status object, etc.)
+    if (typeof err === 'string') {
+      message = err;
+    } else if (err && typeof err === 'object') {
+      message = err.message || err.title || message;
+      
+      // Handle ZeroGPU quota specifically (match regardless of exact wording)
+      const lowerMessage = message.toLowerCase();
+      if (lowerMessage.includes('gpu quota') || lowerMessage.includes('quota exceeded')) {
+        code = 'QUOTA_EXCEEDED';
+        message = `Hugging Face ZeroGPU quota exceeded: ${message}. To bypass this, you can duplicate the 'microsoft/TRELLIS.2' space to your own account and run it on a private GPU.`;
+      } else if (err.type === 'status' && err.stage === 'error') {
+        code = 'GRADIO_ERROR';
+      }
+    }
+
     return NextResponse.json<GenerateModelResponse>(
       {
         success: false,
         error: {
-          code: 'INTERNAL_ERROR',
-          message: 'An unexpected error occurred while processing your request',
+          code,
+          message,
         },
       },
       { status: 500 }
