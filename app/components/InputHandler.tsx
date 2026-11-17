@@ -39,6 +39,13 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
   const [drawing, setDrawing] = useState(false);
   const [painter, setPainter] = useState<PictureEngine>('zimage');
   const by = PICTURE_ENGINES[painter];
+  // seconds spent on the picture so far: a cold GPU can take minutes, and a moving clock shows it is still working
+  const [since, setSince] = useState(0);
+  useEffect(() => {
+    if (!drawing) return;
+    const t0 = Date.now(), tick = setInterval(() => setSince(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => { clearInterval(tick); setSince(0); };
+  }, [drawing]);
 
   // the page keeps its own copy of the preview for the run log, so this one can go when it changes
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
@@ -140,7 +147,17 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
             <>
               <div className="drop still" aria-live="polite">
                 {drawing ? (
-                  <><strong>Drawing the picture…</strong><small className="mono">{by.name} · {by.wait}</small></>
+                  <>
+                    {/* a framed picture sketched line by line, like the 3D view's cube while a model is made */}
+                    <svg className="sketch" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="6" y="8" width="52" height="48" pathLength={100} />
+                      <path d="M6 46 L22 30 L34 42 L42 34 L58 48" pathLength={100} />
+                      <circle cx="43" cy="21" r="5" pathLength={100} />
+                    </svg>
+                    <strong>Drawing the picture…</strong>
+                    <small className="mono">{by.name} · {Math.floor(since / 60)}:{String(since % 60).padStart(2, '0')}</small>
+                    <small>Usually {by.wait}</small>
+                  </>
                 ) : (
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element -- base64 from our own API */}
