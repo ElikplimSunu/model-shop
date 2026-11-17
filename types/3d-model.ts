@@ -19,7 +19,6 @@ export type Engine = keyof typeof ENGINES;
 export const PICTURE_ENGINES = {
   zimage: { name: 'Z-Image Turbo', where: 'Alibaba, on Modal', wait: 'seconds when warm, a few minutes from cold', env: 'MODAL_ZIMAGE_URL' },
   flux: { name: 'FLUX.1 [dev]', where: 'Black Forest Labs, on NVIDIA', wait: 'usually under 30 s', env: 'NVIDIA_API_KEY' },
-  nanobanana: { name: 'Nano Banana 2.1', where: 'Google, about $0.03 a picture', wait: 'usually under a minute', env: 'GEMINI_API_KEY' },
 } as const;
 export type PictureEngine = keyof typeof PICTURE_ENGINES;
 

@@ -1,8 +1,7 @@
 """Z-Image Turbo text-to-picture on Modal, behind the same API key as the 3D models.
 
 Alibaba Tongyi's 6B model, Apache 2.0 (open for commercial use), 8 steps. It makes the picture a
-description becomes before TRELLIS.2 turns it into 3D; the app's other choices are FLUX on NVIDIA
-and Google's Nano Banana.
+description becomes before TRELLIS.2 turns it into 3D; the other choice in the app is FLUX on NVIDIA.
 
 One-off setup (CPU only, cheap):
     modal run zimage_modal.py::download         # caches the weights (about 20 GB) in the zimage-weights volume

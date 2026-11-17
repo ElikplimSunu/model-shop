@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { geminiPicture } from '@/lib/pictures';
 import { PICTURE_ENGINES, type PictureEngine } from '@/types/3d-model';
 
 export const dynamic = 'force-dynamic';
@@ -36,26 +35,6 @@ const MAKERS: Record<PictureEngine, (prompt: string) => Promise<Made>> = {
       return fail(502, 'PICTURE_FAILED', `FLUX said no (${art?.finishReason ?? `status ${res.status}`}).`);
     }
     return { image: art.base64 };
-  },
-
-  // Google's Nano Banana 2.1 through the Interactions API, as documented on 17 Nov 2026. Paid tier only.
-  async nanobanana(prompt) {
-    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
-      method: 'POST',
-      headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY!, 'Content-Type': 'application/json', 'Api-Revision': '2026-05-20' },
-      body: JSON.stringify({
-        model: 'gemini-nano-banana-2.1', input: prompt,
-        response_format: { type: 'image', mime_type: 'image/jpeg', aspect_ratio: '1:1', image_size: '1K' },
-      }),
-      signal: AbortSignal.timeout(180_000),
-    });
-    const body = await res.json().catch(() => null);
-    const said: string = String(body?.error?.message ?? '').slice(0, 160);
-    if (res.status === 429 && /free tier/i.test(said)) {
-      return fail(402, 'BILLING', "Google makes no pictures on its free tier. Turn on billing for this key's project in Google AI Studio.");
-    }
-    const image = res.ok ? geminiPicture(body) : null;
-    return image ? { image } : fail(502, 'PICTURE_FAILED', `Nano Banana said no (${said || `status ${res.status}`}).`);
   },
 };
 
