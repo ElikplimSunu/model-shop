@@ -24,16 +24,16 @@ function Notes() {
       const css = getComputedStyle(document.documentElement);
       swarm = new CursorSwarm({
         root: root.current,
-        // One cursor builds the steps strictly one after another. adaptiveSpeed off: it sped up to 4x
-        // whenever a whole row entered the screen at once, which made the steps unreadable.
-        cursors: 1,
-        colors: [css.getPropertyValue('--red').trim()],
+        // Four cursors share the sheet, a little faster than reading pace. adaptiveSpeed stays off: it sped up
+        // to 4x whenever a whole row entered the screen at once, which made the steps unreadable.
+        cursors: 4,
+        colors: [css.getPropertyValue('--red').trim(), '#3b82c4', '#3a9a6a', '#d08a1e'], // the same crew colours as the Buildings page
         startPosition: 'outside',
         labels: false, hud: false, sparks: false, // keep the drafting tools (guides, measuring box), drop the agent name tags and status pill
         deconstruct: false,
         exitAfterBuild: 'edge',
         adaptiveSpeed: false,
-        speed: 1.25,
+        speed: 1.5,
       }).init();
     });
     return () => { gone = true; swarm?.destroy(); };
