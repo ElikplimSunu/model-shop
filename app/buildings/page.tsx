@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import BuildingViewer from '../components/BuildingViewer';
+import DrawingUpload from '../components/DrawingUpload';
 import { area, pretty, problems, SAMPLES, wallsOf, type Building } from '@/lib/building';
 
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -20,9 +21,15 @@ export default function Buildings() {
   const [pick, setPick] = useState(0);
   const [text, setText] = useState(() => pretty(SAMPLES[0]));
   const [good, setGood] = useState<Building>(SAMPLES[0]);
+  const [view, setView] = useState('0'); // remounts the viewer for each new building
   const { issues } = read(text);
+  const drawn = view.startsWith('drawing');
 
-  const choose = (i: number) => { setPick(i); setText(pretty(SAMPLES[i])); setGood(SAMPLES[i]); };
+  const choose = (i: number) => { setPick(i); setView(String(i)); setText(pretty(SAMPLES[i])); setGood(SAMPLES[i]); };
+  const fromDrawing = useCallback((b: Building, id: string) => {
+    setPick(-1); setView(`drawing-${id}`); setText(pretty(b));
+    if (!problems(b).length) setGood(b);
+  }, []);
   const edit = (t: string) => { setText(t); const r = read(t); if (r.b) setGood(r.b); };
 
   return (
@@ -40,6 +47,7 @@ export default function Buildings() {
               ))}
             </ul>
           </div>
+          <DrawingUpload onBuilding={fromDrawing} />
           <div className="block">
             <h2 className="label"><b>·</b>Measured</h2>
             <dl className="facts num">
@@ -54,11 +62,11 @@ export default function Buildings() {
                 );
               })}
             </dl>
-            <p className="hint">Area is measured inside the wall centrelines. Next: read these numbers from your own drawing.</p>
+            <p className="hint">Area is measured inside the wall centrelines.</p>
           </div>
         </aside>
 
-        <BuildingViewer key={pick} b={good} />
+        <BuildingViewer key={view} b={good} />
 
         <aside className="rail right">
           <div className="block grow">
@@ -84,8 +92,8 @@ export default function Buildings() {
       </main>
 
       <dl className="titleblock">
-        <div><dt>Project</dt><dd>Model Shop</dd></div>
-        <div><dt>Method</dt><dd>Built from measurements · no AI</dd></div>
+        <div><dt>Project</dt><dd>{drawn ? good.name : 'Model Shop'}</dd></div>
+        <div><dt>Method</dt><dd>{drawn ? 'Read from a drawing by Claude · check it' : 'Built from measurements · no AI'}</dd></div>
         <div><dt>Units</dt><dd>Metres</dd></div>
         <div><dt>Scale</dt><dd>True size</dd></div>
         <div><dt>Drawn</dt><dd suppressHydrationWarning>{new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</dd></div>
