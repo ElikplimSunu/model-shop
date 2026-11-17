@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ENGINES, type Engine, type GenerationInput } from '@/types/3d-model';
+import { ENGINES, PICTURE_ENGINES, type Engine, type GenerationInput, type PictureEngine } from '@/types/3d-model';
 
 export type Quality = 'draft' | 'high';
 
@@ -37,6 +37,15 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
   // person checks the picture before any GPU time is spent on the 3D step.
   const [picture, setPicture] = useState<string | null>(null);
   const [drawing, setDrawing] = useState(false);
+  const [painter, setPainter] = useState<PictureEngine>('zimage');
+  const by = PICTURE_ENGINES[painter];
+  // seconds spent on the picture so far: a cold GPU can take minutes, and a moving clock shows it is still working
+  const [since, setSince] = useState(0);
+  useEffect(() => {
+    if (!drawing) return;
+    const t0 = Date.now(), tick = setInterval(() => setSince(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => { clearInterval(tick); setSince(0); };
+  }, [drawing]);
 
   // the page keeps its own copy of the preview for the run log, so this one can go when it changes
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
@@ -54,7 +63,7 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
     if (!text.trim()) return setProblem('Describe the object first.');
     setDrawing(true); setProblem(null); setPicture(null);
     const r = await fetch('/api/generate-image', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text.trim() }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: text.trim(), engine: painter }),
     }).then((res) => res.json()).catch(() => null);
     setDrawing(false);
     if (!r?.success) return setProblem(r?.error?.message ?? 'Lost the connection to the server.');
@@ -127,11 +136,29 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
             onChange={(e) => editText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(); }} />
           <div className="count mono"><span>Describe one object</span><span>{text.length} / {MAX_TEXT}</span></div>
+          <label className="engine" style={{ marginTop: 10 }}>
+            <span className="mono">Picture by</span>
+            <select value={painter} disabled={isLoading || drawing} onChange={(e) => setPainter(e.target.value as PictureEngine)}>
+              {(Object.keys(PICTURE_ENGINES) as PictureEngine[]).map((k) => <option key={k} value={k}>{PICTURE_ENGINES[k].name}</option>)}
+            </select>
+          </label>
+          <p className="hint mono" style={{ marginTop: 4 }}>{by.where}</p>
           {picture || drawing ? (
             <>
               <div className="drop still" aria-live="polite">
                 {drawing ? (
-                  <><strong>Drawing the picture…</strong><small className="mono">FLUX on NVIDIA · usually under 30 s</small></>
+                  <>
+                    {/* a framed picture sketched line by line, like the 3D view's cube while a model is made */}
+                    <svg className="sketch" viewBox="0 0 64 64" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="6" y="8" width="52" height="48" pathLength={100} />
+                      <path d="M6 46 L22 30 L34 42 L42 34 L58 48" pathLength={100} />
+                      <circle cx="43" cy="21" r="5" pathLength={100} />
+                    </svg>
+                    <strong>Drawing the picture…</strong>
+                    {/* the clock ticks every second: hidden from screen readers, or the live region would read it out each time */}
+                    <small className="mono">{by.name}<span aria-hidden="true"> · {Math.floor(since / 60)}:{String(since % 60).padStart(2, '0')}</span></small>
+                    <small>Usually {by.wait}</small>
+                  </>
                 ) : (
                   <>
                     {/* eslint-disable-next-line @next/next/no-img-element -- base64 from our own API */}
@@ -141,7 +168,7 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
                 )}
               </div>
               {picture && !drawing && (
-                <p className="hint"><button type="button" className="linkish" disabled={isLoading} onClick={makePicture}>Try another picture</button> · free, a few seconds</p>
+                <p className="hint"><button type="button" className="linkish" disabled={isLoading} onClick={makePicture}>Try another picture</button> · {by.name}, {by.wait}</p>
               )}
             </>
           ) : (

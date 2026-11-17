@@ -130,6 +130,10 @@ button, input, textarea { font: inherit; color: inherit; }
 .drop .caption { font-size: 11px; color: var(--ink-2); }
 .hint { margin: 10px 0 0; font-size: 12px; color: var(--ink-3); }
 .drop.still { cursor: default; }
+.sketch { width: 64px; height: auto; color: var(--ink-2); margin-bottom: 4px; }
+.sketch * { stroke-dasharray: 140; animation: draft 2.4s ease-in-out infinite alternate; }
+.sketch path { animation-delay: 0.4s; }
+.sketch circle { animation-delay: 0.8s; }
 .drop.still:hover { border-color: var(--ink-3); border-style: dashed; }
 .quality { display: flex; align-items: center; margin-top: 16px; }
 .quality button { background: none; border: 1px solid var(--rule); padding: 6px 14px; cursor: pointer; color: var(--ink-2); font-size: 13px; }
@@ -287,7 +291,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .next-up { background: var(--sheet); border: 1px solid var(--rule); padding: 18px 20px; }
 
 @media (prefers-reduced-motion: reduce) {
-  .drawing .axo path, .drawing .axo line { animation: none; }
+  .drawing .axo path, .drawing .axo line, .sketch * { animation: none; }
   .scale .now { transition: none; }
 }
 
@@ -314,8 +318,21 @@ button, input, textarea { font: inherit; color: inherit; }
 /* ---------- model picker ---------- */
 .engine { display: flex; align-items: center; gap: 10px; margin-top: 16px; font-size: 13px; }
 .engine span { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
-.engine select { flex: 1; padding: 6px 8px; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); font: inherit; }
-.engine select:focus { outline: none; border-color: var(--ink); }
+/* The browser's own arrow sat tight against the edge. This thin chevron is drawn by the label, over the select's
+   right end, in the theme's ink, with room either side. The select is always the label's last child. */
+.engine { position: relative; }
+.engine::after {
+  content: ''; position: absolute; right: 14px; top: 50%; width: 6px; height: 6px; margin-top: -5px;
+  border-right: 1.5px solid var(--ink-2); border-bottom: 1.5px solid var(--ink-2); transform: rotate(45deg); pointer-events: none;
+}
+.engine:has(select:disabled)::after { opacity: 0.45; }
+.engine select {
+  flex: 1; min-width: 0; appearance: none; cursor: pointer;
+  padding: 7px 34px 7px 10px; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); border-radius: 0; font: inherit; line-height: 1.3;
+}
+.engine select:hover:not(:disabled) { border-color: var(--ink-3); }
+.engine select:focus-visible { outline: none; border-color: var(--ink); }
+.engine select:disabled { cursor: default; opacity: 0.55; }
 
 /* drawing upload: floors to choose, then their progress */
 .floors { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid var(--rule); font-size: 13px; }
