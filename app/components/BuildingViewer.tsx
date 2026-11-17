@@ -6,7 +6,7 @@ import { ComponentRef, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { Studio, useDark } from './ModelViewer';
-import { extents, pieces, wallsOf, type Building, type Piece } from '@/lib/building';
+import { extents, grounds, pieces, wallsOf, type Building, type Piece } from '@/lib/building';
 
 type Controls = ComponentRef<typeof OrbitControls>;
 
@@ -18,6 +18,27 @@ function Slab({ p, mat }: { p: Extract<Piece, { kind: 'slab' }>; mat: THREE.Mate
   useEffect(() => () => geo.dispose(), [geo]);
   // the shape is drawn in plan (x, y); turning it -90 degrees about x puts plan y on -z and extrudes upward
   return <mesh geometry={geo} material={mat} position={[0, p.y, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow />;
+}
+
+/** One piece of ground: catches shadows, and when floors lie below ground, shows the earth see-through over them. */
+function Ground({ g, earth, dark }: { g: ReturnType<typeof grounds>[number]; earth: boolean; dark: boolean }) {
+  const geo = useMemo(() => {
+    const v = (pts: [number, number][]) => pts.map(([x, y]) => new THREE.Vector2(x, y));
+    const shape = new THREE.Shape(v(g.outline));
+    shape.holes = g.holes.map((h) => new THREE.Path(v(h)));
+    return new THREE.ShapeGeometry(shape);
+  }, [g]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return (
+    <group position={[0, g.y, 0]} rotation={[-Math.PI / 2, 0, 0]}>{/* plan y onto -z, like the slabs */}
+      <mesh geometry={geo} receiveShadow renderOrder={2}><shadowMaterial opacity={dark ? 0.35 : 0.18} /></mesh>
+      {earth && ( /* drawn first and writing no depth, so the grid and shadows still show on it */
+        <mesh geometry={geo} position={[0, 0, -0.015]} renderOrder={-1}>
+          <meshBasicMaterial color={dark ? '#1f201c' : '#e6e1d4'} transparent opacity={dark ? 0.82 : 0.72} depthWrite={false} toneMapped={false} />
+        </mesh>
+      )}
+    </group>
+  );
 }
 
 /** Shadow area for a building: big enough to hold it and its shadow, small enough to keep the shadow sharp. */
@@ -83,6 +104,9 @@ export default function BuildingViewer({ b }: { b: Building }) {
   useEffect(() => () => Object.values(mats).forEach((m) => m.dispose()), [mats]);
   const e = extents(b);
   const sun = sunFor(e);
+  const land = useMemo(() => grounds(b, sun.reach * 2), [b, sun.reach]);
+  const low = Math.min(...land.map((g) => g.y));
+  const under = e.ground - (b.base ?? 0); // how far the lowest floor is below the main ground
 
   // dimension labels on the ground-floor exterior walls, pushed 0.8 m outside the wall
   const ground = b.levels[0];
@@ -111,19 +135,10 @@ export default function BuildingViewer({ b }: { b: Building }) {
         onCreated={({ gl }) => { gl.toneMapping = THREE.NeutralToneMapping; }}>
         <Studio />
         <Sun key={sun.reach} e={e} />{/* new light per size: three sets a directional shadow's area only when its shadow map is first made */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(e.minX + e.maxX) / 2, -0.2, -(e.minY + e.maxY) / 2]} receiveShadow renderOrder={2}>{/* after the earth, so it does not wash the shadow out */}
-          <planeGeometry args={[sun.reach * 4, sun.reach * 4]} />
-          <shadowMaterial opacity={dark ? 0.35 : 0.18} />
-        </mesh>
-        {e.below > 0 && ( /* the earth over the basements: see-through enough to show them, solid enough to read as underground */
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(e.minX + e.maxX) / 2, -0.215, -(e.minY + e.maxY) / 2]} renderOrder={1}>
-            <planeGeometry args={[sun.reach * 4, sun.reach * 4]} />
-            <meshBasicMaterial color={dark ? '#1f201c' : '#e6e1d4'} transparent opacity={0.72} depthWrite={false} toneMapped={false} />{/* exact page colour, so its edge does not show */}
-          </mesh>
-        )}
+        {land.map((g, i) => <Ground key={i} g={g} earth={under > 0} dark={dark} />)}
         <Grid infiniteGrid cellSize={1} sectionSize={5} cellThickness={0.6} sectionThickness={1}
           cellColor={dark ? '#2f302b' : '#c9c2b2'} sectionColor={dark ? '#4a4a42' : '#a49c89'}
-          fadeDistance={90} fadeStrength={1.5} position={[0, -0.21, 0]} />
+          fadeDistance={90} fadeStrength={1.5} position={[0, low - 0.01, 0]} />{/* on the lowest ground, so it never floats over a sunken yard */}
         <group ref={group} name={b.name}>
           {parts.map((p, i) => p.kind === 'slab'
             ? <Slab key={i} p={p} mat={mats.slab} />
@@ -142,8 +157,8 @@ export default function BuildingViewer({ b }: { b: Building }) {
       <p className="tag mono"><b>02</b> View · true scale, metres</p>
 
       <div className="readout num">
-        <span className="dims"><span>W</span>{e.width.toFixed(2)} <span>D</span>{e.depth.toFixed(2)} <span>H</span>{e.height.toFixed(2)} <span>m outside, ground to roof top</span></span>
-        <span>{e.below > 0 && `basements: ${e.below.toFixed(2)} m below ground · `}grid: 1 m squares, heavier line every 5 m</span>
+        <span className="dims"><span>W</span>{e.width.toFixed(2)} <span>D</span>{e.depth.toFixed(2)} <span>H</span>{(e.height - e.ground).toFixed(2)} <span>m outside, ground to roof top</span></span>
+        <span>{under > 0 && `lowest floor: ${under.toFixed(2)} m below ground · `}grid: 1 m squares, heavier line every 5 m</span>
       </div>
       <div className="tools">
         <button type="button" onClick={() => controls.current?.reset()}>Reset view</button>

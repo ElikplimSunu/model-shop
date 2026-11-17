@@ -25,6 +25,9 @@ export type Building = {
   base?: number; // floor level of the first level, metres from the ground: -8.4 puts three 2.8 m basements underground
   parapet?: number; // solid wall round the roof edge, metres above the roof
   balustrade?: number; // glass on top of the parapet, metres
+  // ground round the building, metres from the ground floor (0). The first entry is the ground everywhere else;
+  // each later one covers only its outline: a sunken yard, a raised terrace. Default: just under the ground-floor slab.
+  site?: { level: number; outline?: Point[] }[];
 };
 
 // Three.js space: x = plan x, y = up, z = -plan y (so north stays up the screen from above).
@@ -55,6 +58,7 @@ export function extents(b: Building) {
     depth: Math.max(...ys) - Math.min(...ys) + b.wallThickness,
     height: base + b.levels.reduce((h, l) => h + l.height, 0) + slab * b.levels.length, // floors between levels, plus the roof
     below: Math.max(0, -base),
+    ground: b.site?.[0]?.level ?? 0, // the main ground level, for heights measured from the ground
   };
 }
 
@@ -67,6 +71,7 @@ export function problems(b: Building): string[] {
   const out: string[] = [];
   if (!(b.wallThickness > 0)) out.push('wallThickness must be a positive number of metres.');
   if (!b.levels?.length) out.push('Add at least one level.');
+  b.site?.slice(1).forEach((a, i) => { if ((a.outline?.length ?? 0) < 3) out.push(`site area ${i + 2} needs an outline of at least 3 corners.`); });
   b.levels?.forEach((lv, li) => {
     const where = `Level ${li + 1} (${lv.name})`;
     if (!(lv.height > 0)) out.push(`${where}: height must be positive.`);
@@ -138,6 +143,31 @@ export function pieces(b: Building): Piece[] {
   }
   return out;
 }
+
+/**
+ * The ground as flat pieces at their levels: the main ground (a square `half` metres each way from the
+ * building's middle) with holes for the building and for each site area, then each area. Never higher than
+ * the bottom of the ground-floor slab, so the ground cannot flicker against a floor.
+ */
+export function grounds(b: Building, half: number) {
+  const e = extents(b), t = b.wallThickness / 2, slab = b.slab ?? 0.2;
+  const [main = { level: 0 }, ...areas] = b.site ?? [];
+  const cx = (e.minX + e.maxX) / 2, cy = (e.minY + e.maxY) / 2;
+  const box = (x0: number, y0: number, x1: number, y1: number): Point[] => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+  // ponytail: the building's hole is its bounding box, exact for rectangles; an L-shaped plan would leave bare ground in its corner
+  const footprint = box(e.minX - t, e.minY - t, e.maxX + t, e.maxY + t);
+  const y = (level: number) => Math.min(level, -slab);
+  return [
+    { y: y(main.level), outline: box(cx - half, cy - half, cx + half, cy + half), holes: [footprint, ...areas.map((a) => a.outline!)] },
+    ...areas.map((a) => ({ y: y(a.level), outline: a.outline!, holes: [] as Point[][] })),
+  ];
+}
+
+/** JSON with each point, wall and opening kept on one line, so a plan reads as a short list. */
+export const pretty = (b: Building) => JSON.stringify(b, null, 2)
+  .replace(/\[\s*(-?[\d.]+),\s*(-?[\d.]+)\s*\]/g, '[$1, $2]')
+  .replace(/\[\s*(\[[^[\]]*\]),\s*(\[[^[\]]*\])\s*\]/g, '[$1, $2]')
+  .replace(/\{[^{}[\]]*\}/g, (m) => m.replace(/\s+/g, ' '));
 
 export const SAMPLES: Building[] = [
   {

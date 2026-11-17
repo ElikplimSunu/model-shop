@@ -1,7 +1,7 @@
 // pnpm exec vitest run lib/building.test.ts
 // Measures the built pieces, not the spec: the 3D shell must come out exactly as the numbers say.
 import { describe, expect, it } from 'vitest';
-import { area, extents, pieces, problems, SAMPLES, type Piece } from './building';
+import { area, extents, grounds, pieces, pretty, problems, SAMPLES, type Piece, type Point } from './building';
 
 type Box = Exclude<Piece, { kind: 'slab' }>;
 
@@ -117,6 +117,26 @@ describe('building from numbers', () => {
     near(bounds(solid).hi[1], roofTop + 1.2);
     near(bounds(glass).hi[1], roofTop + 1.2 + 0.94);
     near(bounds(solid).size[0], 6.2); // parapet runs the full outside width
+  });
+
+  it('lays the ground at its site levels: a sunken yard cut out of the main ground, and no earth inside the building', () => {
+    const yard: Point[] = [[-0.1, 4.1], [6.1, 4.1], [6.1, 9], [-0.1, 9]]; // behind the studio's rear face (y 4.1)
+    const b = { ...studio, site: [{ level: -1.82 }, { level: -7, outline: yard }] };
+    const [main, low] = grounds(b, 50);
+    near(main.y, -1.82);
+    expect(main.holes).toEqual([[[-0.1, -0.1], [6.1, -0.1], [6.1, 4.1], [-0.1, 4.1]], yard]); // the studio's outside faces, then the yard
+    near(low.y, -7);
+    expect(low.outline).toEqual(yard);
+    const e = extents(b);
+    near(e.height - e.ground, 2.9 + 1.82); // the readout measures from the main ground to the roof top
+    near(grounds(studio, 50)[0].y, -0.2); // no site: the ground stays under the ground-floor slab, as before
+    expect(problems({ ...b, site: [{ level: -1.82 }, { level: -7 }] })[0]).toMatch(/site area 2 needs an outline/);
+  });
+
+  it('formats a spec so it reads back as the same building', () => {
+    const b = { ...SAMPLES[2], site: [{ level: -1.82 }, { level: -7, outline: [[0, 7], [9, 7], [9, 12], [0, 12]] as Point[] }] };
+    for (const s of [...SAMPLES, b]) expect(JSON.parse(pretty(s))).toEqual(s);
+    expect(pretty(SAMPLES[0]).split('\n').length).toBeGreaterThan(10); // one item per line, not one long line
   });
 
   it('measures floor area inside the centrelines', () => {
