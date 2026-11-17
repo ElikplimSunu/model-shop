@@ -12,12 +12,23 @@ export type Opening = {
   kind?: 'door' | 'window';
 };
 
+/** Furniture and fittings. At rot 0 the front (where a person sits or stands) faces -y; rot turns it anticlockwise, in degrees. */
+export type Fixture = {
+  kind: string; // one of the keys of SHAPES
+  at: Point; // centre, in plan
+  size: [number, number]; // width and depth, metres
+  rot?: number;
+  from?: number; to?: number; // stairs: heights of the bottom and top of the flight above the floor; rot 0 climbs towards -y
+  h?: number; // landings: height of the top above the floor
+};
+
 export type Level = {
   name: string;
   height: number; // floor to ceiling
   outline: Point[]; // exterior wall centrelines, as a closed loop
   walls?: [Point, Point][]; // interior walls, centrelines
   openings?: Opening[];
+  fixtures?: Fixture[];
 };
 
 export type Building = {
@@ -28,12 +39,39 @@ export type Building = {
   // ground round the building, metres from the ground floor (0). The first entry is the ground everywhere else;
   // each later one covers only its outline: a sunken yard, a raised terrace. Default: just under the ground-floor slab.
   site?: { level: number; outline?: Point[] }[];
+  colors?: { outside?: string; inside?: string; frame?: string; glass?: string }; // CSS colours, when the drawings name the materials
 };
 
 // Three.js space: x = plan x, y = up, z = -plan y (so north stays up the screen from above).
 export type Piece =
-  | { kind: 'wall' | 'glass' | 'frame'; center: [number, number, number]; size: [number, number, number]; rotY: number; exterior?: boolean; roof?: boolean }
+  | { kind: 'wall' | 'glass' | 'frame' | 'thing'; center: [number, number, number]; size: [number, number, number]; rotY: number; exterior?: boolean; roof?: boolean; mat?: Mat }
   | { kind: 'slab'; outline: Point[]; y: number; thickness: number; roof?: boolean };
+
+export type Mat = 'wood' | 'fabric' | 'porcelain' | 'steel' | 'stone' | 'plant';
+type Part = [x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, mat: Mat]; // a box in the fitting's own frame, front at -y
+
+// ponytail: every fitting is a few boxes, no curves or models; swap a kind for a real model when one is wanted
+const SHAPES: Record<string, (w: number, d: number, f: Fixture) => Part[]> = {
+  desk: (w, d) => [[-w / 2, w / 2, -d / 2, d / 2, 0.72, 0.75, 'wood'], [-w / 2, -w / 2 + 0.03, -d / 2, d / 2, 0, 0.72, 'wood'], [w / 2 - 0.03, w / 2, -d / 2, d / 2, 0, 0.72, 'wood']],
+  table: (w, d) => [[-w / 2, w / 2, -d / 2, d / 2, 0.72, 0.75, 'wood'],
+    ...[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([i, j]): Part => [i * (w / 2 - 0.1) - 0.03, i * (w / 2 - 0.1) + 0.03, j * (d / 2 - 0.1) - 0.03, j * (d / 2 - 0.1) + 0.03, 0, 0.72, 'steel'])],
+  chair: (w, d) => [[-0.03, 0.03, -0.03, 0.03, 0, 0.42, 'steel'], [-w / 2, w / 2, -d / 2, d / 2, 0.42, 0.48, 'fabric'], [-w / 2, w / 2, d / 2 - 0.05, d / 2, 0.48, 0.9, 'fabric']],
+  armchair: (w, d) => [[-w / 2, w / 2, -d / 2, d / 2, 0, 0.42, 'fabric'], [-w / 2, w / 2, d / 2 - 0.18, d / 2, 0.42, 0.8, 'fabric'],
+    [-w / 2, -w / 2 + 0.15, -d / 2, d / 2, 0.42, 0.6, 'fabric'], [w / 2 - 0.15, w / 2, -d / 2, d / 2, 0.42, 0.6, 'fabric']],
+  cabinet: (w, d) => [[-w / 2, w / 2, -d / 2, d / 2, 0, 1, 'wood']],
+  counter: (w, d) => [[-w / 2, w / 2, -d / 2, d / 2, 0, 0.86, 'wood'], [-w / 2, w / 2, -d / 2, d / 2, 0.86, 0.9, 'stone']],
+  sink: (w, d) => [[-w / 2, w / 2, -d / 2, d / 2, 0, 0.86, 'wood'], [-w / 2, w / 2, -d / 2, d / 2, 0.86, 0.9, 'steel']],
+  fridge: (w, d) => [[-w / 2, w / 2, -d / 2, d / 2, 0, 1.6, 'steel']],
+  wc: (w, d) => [[-w * 0.4, w * 0.4, -d / 2, d * 0.15, 0, 0.4, 'porcelain'], [-w / 2, w / 2, d * 0.15, d / 2, 0, 0.8, 'porcelain']],
+  basin: (w, d) => [[-0.08, 0.08, 0, d / 2, 0, 0.7, 'porcelain'], [-w / 2, w / 2, -d / 2, d / 2, 0.7, 0.85, 'porcelain']],
+  planter: (w, d) => [[-w / 2, w / 2, -d / 2, d / 2, 0, 0.5, 'stone'], [-w * 0.4, w * 0.4, -d * 0.4, d * 0.4, 0.5, 1.3, 'plant']],
+  stair: (w, d, f) => { // solid steps, lowest at +y, each about 0.175 m high
+    const from = f.from ?? 0, to = f.to ?? from + 1.4, n = Math.max(1, Math.round((to - from) / 0.175)), run = d / n;
+    return Array.from({ length: n }, (_, i): Part => [-w / 2, w / 2, d / 2 - (i + 1) * run, d / 2 - i * run, from, from + ((i + 1) * (to - from)) / n, 'stone']);
+  },
+  landing: (w, d, f) => [[-w / 2, w / 2, -d / 2, d / 2, (f.h ?? 1.4) - 0.15, f.h ?? 1.4, 'stone']],
+};
+SHAPES.sofa = SHAPES.armchair;
 
 export type Wall = { from: Point; to: Point; length: number; exterior: boolean };
 
@@ -87,6 +125,10 @@ export function problems(b: Building): string[] {
       if (o.at < 0 || o.at + o.width > w.length + 1e-9) out.push(`${name}: runs past the end of wall ${o.wall}, which is ${w.length.toFixed(2)} m long.`);
       if ((o.sill ?? 0) + o.height > lv.height + 1e-9) out.push(`${name}: its top is above the ceiling.`);
     });
+    (lv.fixtures ?? []).forEach((f, fi) => {
+      if (!SHAPES[f.kind]) out.push(`${where}, fitting ${fi + 1}: unknown kind "${f.kind}" (use ${Object.keys(SHAPES).join(', ')}).`);
+      else if (!(f.size?.[0] > 0 && f.size?.[1] > 0) || !f.at?.every(Number.isFinite)) out.push(`${where}, fitting ${fi + 1}: needs at [x, y] and a positive size [width, depth].`);
+    });
   });
   return out;
 }
@@ -133,6 +175,13 @@ export function pieces(b: Building): Piece[] {
       }
       box(w, floor, cursor, w.length + t / 2, 0, lv.height);
     });
+    for (const f of lv.fixtures ?? []) {
+      const r = ((f.rot ?? 0) * Math.PI) / 180, cos = Math.cos(r), sin = Math.sin(r);
+      for (const [x0, x1, y0, y1, z0, z1, mat] of SHAPES[f.kind]?.(f.size[0], f.size[1], f) ?? []) {
+        const lx = (x0 + x1) / 2, ly = (y0 + y1) / 2, px = f.at[0] + lx * cos - ly * sin, py = f.at[1] + lx * sin + ly * cos;
+        out.push({ kind: 'thing', mat, rotY: r, size: [x1 - x0, z1 - z0, y1 - y0], center: [px, floor + (z0 + z1) / 2, -py] });
+      }
+    }
     floor += lv.height + slab;
   });
   const top = b.levels[b.levels.length - 1];
