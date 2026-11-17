@@ -60,38 +60,56 @@ function Sun({ e }: { e: ReturnType<typeof extents> }) {
   );
 }
 
-const CREW = ['var(--red)', '#3b82c4', '#3a9a6a']; // the How it works sheet's cursor red, plus two
+const CREW = ['var(--red)', '#3b82c4', '#3a9a6a', '#d08a1e', '#8a5cc4']; // the How it works sheet's cursor red, plus four
+const BUILD = 3; // seconds to put up a building, whatever its size
 
 /**
- * A new building is put up piece by piece, in the order it is built (floor by floor, walls, then fittings),
- * while three cursors glide to the pieces as they land: a look-alike of the cursor crew on the How it works
- * sheet (that library moves between page elements, so it cannot follow 3D pieces). Runs once per building,
- * not on every edit, and not at all for people who ask for reduced motion.
+ * A new building goes up piece by piece while five cursors build it together, like the cursor crew on the
+ * How it works sheet (that library moves between page elements, so it cannot follow 3D pieces). Each cursor
+ * owns a slice of the plan, cut by angle round the middle, and puts up its own pieces floor by floor, so the
+ * crew spreads round the building instead of chasing one point. They fly in from outside and leave when done.
+ * Runs once per building, not on every edit, and not at all for people who ask for reduced motion.
  */
 function Crew({ run, name, children }: { run: string; name: string; children: React.ReactNode }) {
   const group = useRef<THREE.Group>(null);
   const crew = useRef<(THREE.Group | null)[]>([]);
   const look = useRef<(HTMLDivElement | null)[]>([]); // drei's Html ignores a hidden parent, so the cursors fade by style
-  const state = useRef({ run: '', shown: 0, done: true, quiet: 0 });
+  const state = useRef({ run: '', t: 0, done: true, jobs: [] as { obj: THREE.Object3D; at: THREE.Vector3 }[][], home: [] as THREE.Vector3[], built: [] as number[] });
   useFrame((_, dt) => {
     const g = group.current, s = state.current;
     if (!g) return;
-    if (s.run !== run) { // a new building: hide it all and start
-      s.run = run; s.shown = 0; s.quiet = 0;
+    if (s.run !== run) { // a new building: hide it all, share it out, and start
+      s.run = run; s.t = 0;
       s.done = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (!s.done) g.children.forEach((c) => { c.visible = false; });
+      if (!s.done && g.children.length) {
+        const at = g.children.map((c) => c.getWorldPosition(new THREE.Vector3()));
+        const box = new THREE.Box3().setFromPoints(at), mid = box.getCenter(new THREE.Vector3());
+        const r = Math.hypot(box.max.x - box.min.x, box.max.z - box.min.z) / 2 + 3, slice = (2 * Math.PI) / CREW.length;
+        s.jobs = CREW.map(() => []); s.built = CREW.map(() => 0);
+        g.children.forEach((c, i) => { // pieces keep their building order (floor by floor) inside each slice
+          c.visible = false;
+          s.jobs[Math.floor((Math.atan2(at[i].z - mid.z, at[i].x - mid.x) + Math.PI) / slice) % CREW.length].push({ obj: c, at: at[i] });
+        });
+        s.home = CREW.map((_, k) => { const a = (k + 0.5) * slice - Math.PI; return new THREE.Vector3(mid.x + Math.cos(a) * r, box.min.y, mid.z + Math.sin(a) * r); });
+        crew.current.forEach((c, k) => { if (c) { c.position.copy(s.home[k]); c.userData.to = s.home[k]; } });
+        look.current.forEach((d) => { if (d) d.style.opacity = '1'; });
+      } else s.done = true;
     }
-    const n = g.children.length;
     if (s.done) { look.current.forEach((d) => { if (d && d.style.opacity !== '0') d.style.opacity = '0'; }); return; }
-    const next = Math.min(n, s.shown + Math.max(1, Math.ceil((n * dt) / 2.5))); // about 2.5 s whatever the size
-    for (let i = s.shown; i < next; i++) {
-      const m = g.children[i]; m.visible = true;
-      const c = crew.current[i % CREW.length];
-      if (c) { c.userData.to = m.getWorldPosition(new THREE.Vector3()); const d = look.current[i % CREW.length]; if (d) d.style.opacity = '1'; }
+    s.t += dt;
+    const f = Math.min(1, s.t / BUILD);
+    s.jobs.forEach((job, k) => { // every cursor works through its own slice at the same pace
+      const next = Math.ceil(job.length * f), c = crew.current[k];
+      for (let i = s.built[k]; i < next; i++) job[i].obj.visible = true;
+      if (c && next > s.built[k]) c.userData.to = job[next - 1].at;
+      s.built[k] = next;
+    });
+    if (f >= 1) { // all up: each cursor heads back out the way it came, fading as it goes
+      crew.current.forEach((c, k) => { if (c) c.userData.to = s.home[k]; });
+      if (s.t > BUILD + 0.3) look.current.forEach((d) => { if (d) d.style.opacity = '0'; });
+      if (s.t > BUILD + 0.8) s.done = true;
     }
-    s.shown = next;
-    crew.current.forEach((c) => { if (c?.userData.to) c.position.lerp(c.userData.to, Math.min(1, dt * 9)); });
-    if (s.shown >= n && (s.quiet += dt) > 0.6) s.done = true; // let them settle on the last pieces, then leave
+    crew.current.forEach((c) => { if (c?.userData.to) c.position.lerp(c.userData.to, Math.min(1, dt * 7)); });
   });
   return <>
     <group ref={group} name={name}>{children}</group>
