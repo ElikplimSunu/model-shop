@@ -1,9 +1,9 @@
 // pnpm exec vitest run lib/building.test.ts
 // Measures the built pieces, not the spec: the 3D shell must come out exactly as the numbers say.
 import { describe, expect, it } from 'vitest';
-import { area, extents, pieces, problems, SAMPLES, type Piece } from './building';
+import { area, extents, grounds, pieces, pretty, problems, SAMPLES, type Piece, type Point } from './building';
 
-type Box = Extract<Piece, { kind: 'wall' | 'glass' }>;
+type Box = Exclude<Piece, { kind: 'slab' }>;
 
 /** World-space bounds of a set of boxes (rotated about y). */
 function bounds(boxes: Box[]) {
@@ -74,6 +74,69 @@ describe('building from numbers', () => {
       near(extents(b).height, roof.y + roof.thickness);
     }
     near(extents(studio).height, 2.9); // 2.7 m room plus a 0.2 m roof slab
+  });
+
+  it('puts basements below ground when the first level starts below it', () => {
+    // three 2.6 m basements under a ground floor: base -8.4, so the ground floor sits at 0
+    const lv = (name: string) => ({ ...studio.levels[0], name, height: 2.6, openings: [] });
+    const b = { ...studio, slab: 0.2, base: -8.4, levels: ['B3', 'B2', 'B1', 'Ground'].map(lv) };
+    const walls = pieces(b).filter((p): p is Box => p.kind === 'wall');
+    const { lo, hi } = bounds(walls);
+    near(lo[1], -8.4); // the lowest basement floor
+    near(hi[1], 2.6); // the ground floor's ceiling
+    const e = extents(b);
+    near(e.height, 2.8); // above ground only: ground floor plus its roof slab
+    near(e.below, 8.4);
+  });
+
+  it('frames every window: jambs, sill, head, and a centre mullion when it is a metre or wider', () => {
+    const frames = pieces(studio).filter((p): p is Box => p.kind === 'frame');
+    expect(frames).toHaveLength(2 * 5); // two 1.8 m windows, five pieces each
+    for (const f of frames) { // every frame piece sits inside its window hole: from the sill (0.9) to the head (2.1)
+      expect(f.center[1] - f.size[1] / 2).toBeGreaterThanOrEqual(0.9 - 1e-9);
+      expect(f.center[1] + f.size[1] / 2).toBeLessThanOrEqual(2.1 + 1e-9);
+    }
+  });
+
+  it('marks outside walls, so the facade can look different from the rooms', () => {
+    const bungalow = pieces(SAMPLES[1]).filter((p): p is Box => p.kind === 'wall');
+    expect(bungalow.some((w) => w.exterior)).toBe(true);
+    expect(bungalow.some((w) => !w.exterior)).toBe(true);
+    const inner = bungalow.filter((w) => !w.exterior); // the bungalow's inside walls run along x = 6 and y = 4 only
+    for (const w of inner) expect(Math.abs(w.center[0] - 6) < 1e-9 || Math.abs(w.center[2] + 4) < 1e-9).toBe(true);
+  });
+
+  it('puts a parapet round the roof with a glass balustrade on top, both lifted with the roof', () => {
+    const b = { ...studio, parapet: 1.2, balustrade: 0.94 };
+    const roofTop = extents(b).height; // 2.9
+    const parapet = pieces(b).filter((p): p is Box => p.kind !== 'slab' && !!p.roof);
+    const solid = parapet.filter((p) => p.kind === 'wall'), glass = parapet.filter((p) => p.kind === 'glass');
+    expect(solid).toHaveLength(4);
+    expect(glass).toHaveLength(4);
+    near(bounds(solid).lo[1], roofTop);
+    near(bounds(solid).hi[1], roofTop + 1.2);
+    near(bounds(glass).hi[1], roofTop + 1.2 + 0.94);
+    near(bounds(solid).size[0], 6.2); // parapet runs the full outside width
+  });
+
+  it('lays the ground at its site levels: a sunken yard cut out of the main ground, and no earth inside the building', () => {
+    const yard: Point[] = [[-0.1, 4.1], [6.1, 4.1], [6.1, 9], [-0.1, 9]]; // behind the studio's rear face (y 4.1)
+    const b = { ...studio, site: [{ level: -1.82 }, { level: -7, outline: yard }] };
+    const [main, low] = grounds(b, 50);
+    near(main.y, -1.82);
+    expect(main.holes).toEqual([[[-0.1, -0.1], [6.1, -0.1], [6.1, 4.1], [-0.1, 4.1]], yard]); // the studio's outside faces, then the yard
+    near(low.y, -7);
+    expect(low.outline).toEqual(yard);
+    const e = extents(b);
+    near(e.height - e.ground, 2.9 + 1.82); // the readout measures from the main ground to the roof top
+    near(grounds(studio, 50)[0].y, -0.2); // no site: the ground stays under the ground-floor slab, as before
+    expect(problems({ ...b, site: [{ level: -1.82 }, { level: -7 }] })[0]).toMatch(/site area 2 needs an outline/);
+  });
+
+  it('formats a spec so it reads back as the same building', () => {
+    const b = { ...SAMPLES[2], site: [{ level: -1.82 }, { level: -7, outline: [[0, 7], [9, 7], [9, 12], [0, 12]] as Point[] }] };
+    for (const s of [...SAMPLES, b]) expect(JSON.parse(pretty(s))).toEqual(s);
+    expect(pretty(SAMPLES[0]).split('\n').length).toBeGreaterThan(10); // one item per line, not one long line
   });
 
   it('measures floor area inside the centrelines', () => {

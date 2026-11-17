@@ -2,13 +2,7 @@
 
 import { useState } from 'react';
 import BuildingViewer from '../components/BuildingViewer';
-import { area, problems, SAMPLES, wallsOf, type Building } from '@/lib/building';
-
-// JSON with each point, wall and opening kept on one line, so a plan reads as a short list.
-const pretty = (b: Building) => JSON.stringify(b, null, 2)
-  .replace(/\[\s*(-?[\d.]+),\s*(-?[\d.]+)\s*\]/g, '[$1, $2]')
-  .replace(/\[\s*(\[[^[\]]*\]),\s*(\[[^[\]]*\])\s*\]/g, '[$1, $2]')
-  .replace(/\{[^{}[\]]*\}/g, (m) => m.replace(/\s+/g, ' '));
+import { area, pretty, problems, SAMPLES, wallsOf, type Building } from '@/lib/building';
 
 const count = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -70,6 +64,10 @@ export default function Buildings() {
           <div className="block grow">
             <h2 className="label"><b>03</b>Numbers<span className="aside">metres</span></h2>
             <textarea className="spec mono" spellCheck={false} value={text} onChange={(e) => edit(e.target.value)}
+              onPaste={(e) => { // a pasted building is laid out one item per line; anything that is not JSON pastes as usual
+                const ta = e.currentTarget, next = ta.value.slice(0, ta.selectionStart) + e.clipboardData.getData('text') + ta.value.slice(ta.selectionEnd);
+                try { const b = JSON.parse(next) as Building; e.preventDefault(); edit(pretty(b)); } catch { /* not whole JSON yet: let it paste */ }
+              }}
               aria-label="The building as numbers" aria-describedby="spec-help" />
             <p id="spec-help" className="hint">
               <b>outline</b>: wall centrelines, corner by corner. <b>walls</b>: inside walls. <b>openings</b>: wall number (outline sides from 0, then inside walls),
