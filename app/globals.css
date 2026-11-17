@@ -316,3 +316,14 @@ button, input, textarea { font: inherit; color: inherit; }
 .engine span { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
 .engine select { flex: 1; padding: 6px 8px; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); font: inherit; }
 .engine select:focus { outline: none; border-color: var(--ink); }
+
+/* drawing upload: floors to choose, then their progress */
+.floors { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid var(--rule); font-size: 13px; }
+.floors li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--rule); }
+.floors label { display: flex; align-items: baseline; gap: 8px; width: 100%; cursor: pointer; }
+.floors .num { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+.floors li[data-state="done"] .num { color: var(--ink); }
+.floors li[data-state="failed"] .num { color: var(--red); }
+.floors li[data-state="walls"] .num, .floors li[data-state="furniture"] .num { color: var(--red); }
+.floors a { font-size: 11px; color: var(--ink-2); }
+.floors small { width: 100%; font-size: 11px; color: var(--ink-3); }

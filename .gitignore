@@ -49,3 +49,6 @@ demo/
 
 # python bytecode from the Modal scripts
 __pycache__/
+
+# uploaded drawings and their readings (third-party files, this Mac only)
+.drawings/
