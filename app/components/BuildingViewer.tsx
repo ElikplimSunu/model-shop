@@ -1,6 +1,6 @@
 'use client';
 
-import { Canvas, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Grid, Html, OrbitControls } from '@react-three/drei';
 import { ComponentRef, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
@@ -60,6 +60,53 @@ function Sun({ e }: { e: ReturnType<typeof extents> }) {
   );
 }
 
+const CREW = ['var(--red)', '#3b82c4', '#3a9a6a']; // the How it works sheet's cursor red, plus two
+
+/**
+ * A new building is put up piece by piece, in the order it is built (floor by floor, walls, then fittings),
+ * while three cursors glide to the pieces as they land: a look-alike of the cursor crew on the How it works
+ * sheet (that library moves between page elements, so it cannot follow 3D pieces). Runs once per building,
+ * not on every edit, and not at all for people who ask for reduced motion.
+ */
+function Crew({ run, name, children }: { run: string; name: string; children: React.ReactNode }) {
+  const group = useRef<THREE.Group>(null);
+  const crew = useRef<(THREE.Group | null)[]>([]);
+  const look = useRef<(HTMLDivElement | null)[]>([]); // drei's Html ignores a hidden parent, so the cursors fade by style
+  const state = useRef({ run: '', shown: 0, done: true, quiet: 0 });
+  useFrame((_, dt) => {
+    const g = group.current, s = state.current;
+    if (!g) return;
+    if (s.run !== run) { // a new building: hide it all and start
+      s.run = run; s.shown = 0; s.quiet = 0;
+      s.done = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!s.done) g.children.forEach((c) => { c.visible = false; });
+    }
+    const n = g.children.length;
+    if (s.done) { look.current.forEach((d) => { if (d && d.style.opacity !== '0') d.style.opacity = '0'; }); return; }
+    const next = Math.min(n, s.shown + Math.max(1, Math.ceil((n * dt) / 2.5))); // about 2.5 s whatever the size
+    for (let i = s.shown; i < next; i++) {
+      const m = g.children[i]; m.visible = true;
+      const c = crew.current[i % CREW.length];
+      if (c) { c.userData.to = m.getWorldPosition(new THREE.Vector3()); const d = look.current[i % CREW.length]; if (d) d.style.opacity = '1'; }
+    }
+    s.shown = next;
+    crew.current.forEach((c) => { if (c?.userData.to) c.position.lerp(c.userData.to, Math.min(1, dt * 9)); });
+    if (s.shown >= n && (s.quiet += dt) > 0.6) s.done = true; // let them settle on the last pieces, then leave
+  });
+  return <>
+    <group ref={group} name={name}>{children}</group>
+    {CREW.map((color, i) => (
+    <group key={i} ref={(el) => { crew.current[i] = el; }}>
+      <Html zIndexRange={[20, 10]} style={{ pointerEvents: 'none' }}>
+        <div ref={(el) => { look.current[i] = el; }} style={{ opacity: 0, transition: 'opacity .4s ease' }}><svg width="22" height="22" viewBox="0 0 24 24" style={{ display: 'block', filter: 'drop-shadow(0 4px 10px rgba(0,0,0,.35))' }}>
+          <path d="M3 2l7.6 19.2 2.7-8 7.9-2.8z" fill={color} stroke="#fff" strokeWidth="1.3" strokeLinejoin="round" />
+        </svg></div>
+      </Html>
+    </group>
+    ))}
+  </>;
+}
+
 /** Frames the whole building once per size, and saves that view for Reset. */
 function Fit({ b }: { b: Building }) {
   const size = useThree((s) => s.size);
@@ -86,21 +133,29 @@ function Fit({ b }: { b: Building }) {
 export default function BuildingViewer({ b }: { b: Building }) {
   const dark = useDark();
   const controls = useRef<Controls>(null);
-  const group = useRef<THREE.Group>(null);
+  const scene = useRef<THREE.Scene>(null);
   const [roof, setRoof] = useState(true);
   const [hidden, setHidden] = useState(0); // top floors hidden; counting from the top keeps every floor shown when a taller building is pasted
   const shownLevels = Math.max(1, b.levels.length - hidden);
   const shown = useMemo(() => ({ ...b, levels: b.levels.slice(0, shownLevels) }), [b, shownLevels]);
   const parts = useMemo(() => pieces(shown).filter((p) => roof || !p.roof), [shown, roof]);
-  // ponytail: one fixed look (light render outside, white inside, tinted glass, dark aluminium frames); per-building colours when a drawing names them
-  const mats = useMemo(() => ({
-    outside: new THREE.MeshStandardMaterial({ color: '#d6d1c7', roughness: 0.9 }),
-    inside: new THREE.MeshStandardMaterial({ color: '#f1eee8', roughness: 0.85 }),
-    slab: new THREE.MeshStandardMaterial({ color: '#a8a39a', roughness: 0.9 }),
-    glass: new THREE.MeshStandardMaterial({ color: '#4f6b7d', roughness: 0.04, metalness: 0.35, transparent: true, opacity: 0.6, envMapIntensity: 1.4 }),
-    frame: new THREE.MeshStandardMaterial({ color: '#3b3f44', roughness: 0.45, metalness: 0.6 }),
-  }), []);
-  const matOf = (p: Exclude<Piece, { kind: 'slab' }>) => p.kind === 'glass' ? mats.glass : p.kind === 'frame' ? mats.frame : p.exterior ? mats.outside : mats.inside;
+  // a default look (light render outside, white inside, tinted glass, dark aluminium frames), with the building's own colours where its drawings name them
+  const colors = JSON.stringify(b.colors ?? {});
+  const mats = useMemo(() => {
+    const c = JSON.parse(colors) as NonNullable<Building['colors']>;
+    const std = (color: string, roughness: number, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
+    return {
+      outside: std(c.outside ?? '#d6d1c7', 0.9),
+      inside: std(c.inside ?? '#f1eee8', 0.85),
+      slab: std('#a8a39a', 0.9),
+      glass: new THREE.MeshStandardMaterial({ color: c.glass ?? '#4f6b7d', roughness: 0.04, metalness: 0.35, transparent: true, opacity: 0.6, envMapIntensity: 1.4 }),
+      frame: std(c.frame ?? '#3b3f44', 0.45, 0.6),
+      // ponytail: fittings share six fixed materials; per-item colours when a drawing gives them
+      wood: std('#b08a5e', 0.7), fabric: std('#3f444c', 0.95), porcelain: std('#f7f6f2', 0.25), steel: std('#b7bcc2', 0.35, 0.7),
+      stone: std('#cfcac0', 0.8), plant: std('#4d7a45', 0.9),
+    };
+  }, [colors]);
+  const matOf = (p: Exclude<Piece, { kind: 'slab' }>) => p.kind === 'thing' ? mats[p.mat ?? 'wood'] : p.kind === 'glass' ? mats.glass : p.kind === 'frame' ? mats.frame : p.exterior ? mats.outside : mats.inside;
   useEffect(() => () => Object.values(mats).forEach((m) => m.dispose()), [mats]);
   const e = extents(b);
   const sun = sunFor(e);
@@ -119,8 +174,9 @@ export default function BuildingViewer({ b }: { b: Building }) {
   });
 
   const download = () => {
-    if (!group.current) return;
-    new GLTFExporter().parse(group.current, (out) => {
+    const building = scene.current?.getObjectByName(b.name);
+    if (!building) return;
+    new GLTFExporter().parse(building, (out) => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([out as ArrayBuffer], { type: 'model/gltf-binary' }));
       a.download = `${b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'building'}.glb`;
@@ -132,20 +188,20 @@ export default function BuildingViewer({ b }: { b: Building }) {
   return (
     <section className="view" aria-label="3D view of the building">
       <Canvas dpr={[1, 2]} shadows camera={{ fov: 35, position: [20, 15, 20] }}
-        onCreated={({ gl }) => { gl.toneMapping = THREE.NeutralToneMapping; }}>
+        onCreated={({ gl, scene: sc }) => { gl.toneMapping = THREE.NeutralToneMapping; scene.current = sc; }}>
         <Studio />
         <Sun key={sun.reach} e={e} />{/* new light per size: three sets a directional shadow's area only when its shadow map is first made */}
         {land.map((g, i) => <Ground key={i} g={g} earth={under > 0} dark={dark} />)}
         <Grid infiniteGrid cellSize={1} sectionSize={5} cellThickness={0.6} sectionThickness={1}
           cellColor={dark ? '#2f302b' : '#c9c2b2'} sectionColor={dark ? '#4a4a42' : '#a49c89'}
           fadeDistance={90} fadeStrength={1.5} position={[0, low - 0.01, 0]} />{/* on the lowest ground, so it never floats over a sunken yard */}
-        <group ref={group} name={b.name}>
+        <Crew run={`${b.name}|${b.levels.length}`} name={b.name}>{/* puts a new building up piece by piece */}
           {parts.map((p, i) => p.kind === 'slab'
             ? <Slab key={i} p={p} mat={mats.slab} />
             : <mesh key={i} material={matOf(p)} position={p.center} rotation={[0, p.rotY, 0]} castShadow={p.kind !== 'glass'} receiveShadow>
                 <boxGeometry args={p.size} />
               </mesh>)}
-        </group>
+        </Crew>
         {labels.map((l, i) => (
           <Html key={i} position={l.pos} center zIndexRange={[10, 0]}><span className="dim-label mono">{l.text}</span></Html>
         ))}

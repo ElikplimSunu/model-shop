@@ -139,6 +139,26 @@ describe('building from numbers', () => {
     expect(pretty(SAMPLES[0]).split('\n').length).toBeGreaterThan(10); // one item per line, not one long line
   });
 
+  it('places fittings on their floor, turned to face the way the spec says', () => {
+    const lv = { ...studio.levels[0], fixtures: [
+      { kind: 'chair', at: [3, 2] as Point, size: [0.5, 0.5] as [number, number], rot: 90 }, // faces +x, so its back is on the -x side
+      { kind: 'stair', at: [1, 2] as Point, size: [1, 3] as [number, number], from: 0, to: 1.4 }, // rot 0: climbs towards -y
+    ] };
+    const b = { ...studio, levels: [lv, { ...lv, name: 'Upper' }] };
+    const things = pieces(b).filter((p): p is Box => p.kind === 'thing');
+    const lower = things.filter((t) => t.center[1] < 2.9), upper = things.filter((t) => t.center[1] > 2.9);
+    expect(lower.length).toBe(upper.length); // the same fittings on both floors
+    near(bounds(upper).lo[1], 2.9); // standing on the upper floor (2.7 room + 0.2 slab)
+    const chair = lower.filter((t) => Math.abs(t.center[0] - 3) < 0.5 && Math.abs(t.center[2] + 2) < 0.5);
+    const back = chair.reduce((a, z) => (a.center[1] + a.size[1] / 2 > z.center[1] + z.size[1] / 2 ? a : z)); // the tallest piece
+    expect(back.center[0]).toBeLessThan(3);
+    const steps = lower.filter((t) => Math.abs(t.center[0] - 1) < 0.6);
+    const top = steps.reduce((a, z) => (a.center[1] + a.size[1] / 2 > z.center[1] + z.size[1] / 2 ? a : z));
+    near(top.center[1] + top.size[1] / 2, 1.4); // the flight ends at its "to" height
+    expect(-top.center[2]).toBeLessThan(2); // and its top step is at the -y end
+    expect(problems({ ...b, levels: [{ ...lv, fixtures: [{ kind: 'spaceship', at: [1, 1], size: [1, 1] }] }] })[0]).toMatch(/unknown kind "spaceship"/);
+  });
+
   it('measures floor area inside the centrelines', () => {
     near(area(studio.levels[0].outline), 24);
     near(area(SAMPLES[1].levels[0].outline), 96);
