@@ -155,7 +155,8 @@ export default function InputHandler({ onSubmit, isLoading }: InputHandlerProps)
                       <circle cx="43" cy="21" r="5" pathLength={100} />
                     </svg>
                     <strong>Drawing the picture…</strong>
-                    <small className="mono">{by.name} · {Math.floor(since / 60)}:{String(since % 60).padStart(2, '0')}</small>
+                    {/* the clock ticks every second: hidden from screen readers, or the live region would read it out each time */}
+                    <small className="mono">{by.name}<span aria-hidden="true"> · {Math.floor(since / 60)}:{String(since % 60).padStart(2, '0')}</span></small>
                     <small>Usually {by.wait}</small>
                   </>
                 ) : (
