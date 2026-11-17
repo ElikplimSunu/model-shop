@@ -15,6 +15,14 @@ export const ENGINES = {
 } as const;
 export type Engine = keyof typeof ENGINES;
 
+/** Picture makers for descriptions. The person checks the picture before any 3D GPU time. */
+export const PICTURE_ENGINES = {
+  zimage: { name: 'Z-Image Turbo', where: 'Alibaba, on Modal', wait: 'seconds when warm, a few minutes from cold', env: 'MODAL_ZIMAGE_URL' },
+  flux: { name: 'FLUX.1 [dev]', where: 'Black Forest Labs, on NVIDIA', wait: 'usually under 30 s', env: 'NVIDIA_API_KEY' },
+  nanobanana: { name: 'Nano Banana 2.1', where: 'Google, about $0.03 a picture', wait: 'usually under a minute', env: 'GEMINI_API_KEY' },
+} as const;
+export type PictureEngine = keyof typeof PICTURE_ENGINES;
+
 export interface GenerateModelRequest {
   type: 'image' | 'text';
   data: string; // base64 image or text prompt

@@ -113,7 +113,7 @@ export default function Objects() {
 
         <dl className="titleblock">
           <div><dt>Project</dt><dd>Model Shop</dd></div>
-          <div><dt>Engines</dt><dd title="Photos: Microsoft TRELLIS.2 (default, reads the picture with Meta DINOv3), TRELLIS v1 or Tencent Hunyuan3D-2.1, each on its own GPU. Descriptions: a FLUX picture first (on NVIDIA), then the chosen model.">TRELLIS.2 + Meta DINOv3, TRELLIS v1 or Hunyuan3D-2.1 · Words: FLUX picture first</dd></div>
+          <div><dt>Engines</dt><dd title="Photos: Microsoft TRELLIS.2 (default, reads the picture with Meta DINOv3), TRELLIS v1 or Tencent Hunyuan3D-2.1, each on its own GPU. Descriptions: a picture first (Z-Image Turbo on Modal, FLUX.1 [dev] on NVIDIA, or Google Nano Banana 2.1), then the chosen model.">TRELLIS.2 + Meta DINOv3, TRELLIS v1 or Hunyuan3D-2.1 · Words: a picture first</dd></div>
           <div><dt>Hardware</dt><dd>Modal · NVIDIA L40S</dd></div>
           <div><dt>Scale</dt><dd>Not to scale</dd></div>
           <div><dt>Drawn</dt><dd suppressHydrationWarning>{new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</dd></div>
