@@ -61,7 +61,7 @@ A notes sheet, drawn on screen by animated cursors, that explains in four steps 
 ## How it works
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph PC["Your computer, 127.0.0.1 only"]
     B["Browser: the three pages. Buildings from numbers are built here."]
     subgraph NX["Next.js server"]
