@@ -20,11 +20,16 @@ export type Level = {
   openings?: Opening[];
 };
 
-export type Building = { name: string; wallThickness: number; slab?: number; levels: Level[] };
+export type Building = {
+  name: string; wallThickness: number; slab?: number; levels: Level[];
+  base?: number; // floor level of the first level, metres from the ground: -8.4 puts three 2.8 m basements underground
+  parapet?: number; // solid wall round the roof edge, metres above the roof
+  balustrade?: number; // glass on top of the parapet, metres
+};
 
 // Three.js space: x = plan x, y = up, z = -plan y (so north stays up the screen from above).
 export type Piece =
-  | { kind: 'wall' | 'glass'; center: [number, number, number]; size: [number, number, number]; rotY: number }
+  | { kind: 'wall' | 'glass' | 'frame'; center: [number, number, number]; size: [number, number, number]; rotY: number; exterior?: boolean; roof?: boolean }
   | { kind: 'slab'; outline: Point[]; y: number; thickness: number; roof?: boolean };
 
 export type Wall = { from: Point; to: Point; length: number; exterior: boolean };
@@ -38,16 +43,18 @@ export function wallsOf(level: Level): Wall[] {
   return [...outer, ...inner].map((w) => ({ ...w, length: len(w.from, w.to) }));
 }
 
-/** Outside size in metres: plan extents of the centrelines plus one wall thickness; height from the ground to the top of the roof slab. */
+/** Outside size in metres: plan extents of the centrelines plus one wall thickness; height from the ground to the top of the roof slab, and depth below ground. */
 export function extents(b: Building) {
   const pts = b.levels.flatMap((l) => l.outline);
   const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
   const slab = b.slab ?? 0.2;
+  const base = b.base ?? 0;
   return {
     minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys),
     width: Math.max(...xs) - Math.min(...xs) + b.wallThickness,
     depth: Math.max(...ys) - Math.min(...ys) + b.wallThickness,
-    height: b.levels.reduce((h, l) => h + l.height, 0) + slab * b.levels.length, // floors between levels, plus the roof
+    height: base + b.levels.reduce((h, l) => h + l.height, 0) + slab * b.levels.length, // floors between levels, plus the roof
+    below: Math.max(0, -base),
   };
 }
 
@@ -86,35 +93,49 @@ export function problems(b: Building): string[] {
 export function pieces(b: Building): Piece[] {
   const t = b.wallThickness;
   const slab = b.slab ?? 0.2;
+  const F = 0.05; // window frame width
   const out: Piece[] = [];
-  let floor = 0;
+  // A box along wall w: s0 to s1 along its centreline, y0 to y1 above `at` (the floor it stands on).
+  const box = (w: Wall, at: number, s0: number, s1: number, y0: number, y1: number, kind: 'wall' | 'glass' | 'frame' = 'wall', depth = t, roof = false) => {
+    if (s1 - s0 < 1e-6 || y1 - y0 < 1e-6) return;
+    const th = Math.atan2(w.to[1] - w.from[1], w.to[0] - w.from[0]), c = (s0 + s1) / 2;
+    out.push({
+      kind, rotY: th, size: [s1 - s0, y1 - y0, depth], exterior: w.exterior, ...(roof && { roof }),
+      center: [w.from[0] + Math.cos(th) * c, at + (y0 + y1) / 2, -(w.from[1] + Math.sin(th) * c)],
+    });
+  };
+  let floor = b.base ?? 0;
   b.levels.forEach((lv) => {
     out.push({ kind: 'slab', outline: lv.outline, y: floor - slab, thickness: slab });
     wallsOf(lv).forEach((w, wi) => {
-      const th = Math.atan2(w.to[1] - w.from[1], w.to[0] - w.from[0]);
-      const box = (s0: number, s1: number, y0: number, y1: number, kind: 'wall' | 'glass' = 'wall', depth = t) => {
-        if (s1 - s0 < 1e-6 || y1 - y0 < 1e-6) return;
-        const c = (s0 + s1) / 2;
-        out.push({
-          kind, rotY: th, size: [s1 - s0, y1 - y0, depth],
-          center: [w.from[0] + Math.cos(th) * c, floor + (y0 + y1) / 2, -(w.from[1] + Math.sin(th) * c)],
-        });
-      };
       const holes = (lv.openings ?? []).filter((o) => o.wall === wi).sort((a, z) => a.at - z.at);
       let cursor = -t / 2;
       for (const o of holes) {
-        const bottom = o.kind === 'door' || o.sill === undefined ? 0 : o.sill;
-        box(cursor, o.at, 0, lv.height);
-        box(o.at, o.at + o.width, 0, bottom); // below a window
-        box(o.at, o.at + o.width, bottom + o.height, lv.height); // above the opening
-        if (bottom > 0) box(o.at, o.at + o.width, bottom, bottom + o.height, 'glass', 0.02);
+        const bottom = o.kind === 'door' || o.sill === undefined ? 0 : o.sill, top = bottom + o.height;
+        box(w, floor, cursor, o.at, 0, lv.height);
+        box(w, floor, o.at, o.at + o.width, 0, bottom); // below a window
+        box(w, floor, o.at, o.at + o.width, top, lv.height); // above the opening
+        if (bottom > 0) {
+          const [a, z] = [o.at, o.at + o.width];
+          box(w, floor, a, z, bottom, top, 'glass', 0.02);
+          box(w, floor, a, a + F, bottom, top, 'frame', 0.08); // jambs
+          box(w, floor, z - F, z, bottom, top, 'frame', 0.08);
+          box(w, floor, a + F, z - F, bottom, bottom + F, 'frame', 0.08); // sill and head
+          box(w, floor, a + F, z - F, top - F, top, 'frame', 0.08);
+          if (o.width >= 1) box(w, floor, (a + z - F) / 2, (a + z + F) / 2, bottom + F, top - F, 'frame', 0.08); // centre mullion
+        }
         cursor = o.at + o.width;
       }
-      box(cursor, w.length + t / 2, 0, lv.height);
+      box(w, floor, cursor, w.length + t / 2, 0, lv.height);
     });
     floor += lv.height + slab;
   });
-  out.push({ kind: 'slab', outline: b.levels[b.levels.length - 1].outline, y: floor - slab, thickness: slab, roof: true }); // flat roof
+  const top = b.levels[b.levels.length - 1];
+  out.push({ kind: 'slab', outline: top.outline, y: floor - slab, thickness: slab, roof: true }); // flat roof
+  if (b.parapet) for (const w of wallsOf({ ...top, walls: [] })) { // round the roof edge, on top of the roof slab
+    box(w, floor, -t / 2, w.length + t / 2, 0, b.parapet, 'wall', t, true);
+    if (b.balustrade) box(w, floor, -t / 2, w.length + t / 2, b.parapet, b.parapet + b.balustrade, 'glass', 0.02, true);
+  }
   return out;
 }
 
