@@ -19,7 +19,7 @@ const MAX_BYTES = 200 * 1024 * 1024;
 
 type Status = { done?: boolean; error?: string | null; stage?: string; [k: string]: unknown };
 
-const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = (pid: number) => { if (!(pid > 0)) return false; try { process.kill(pid, 0); return true; } catch { return false; } }; // kill(0) would test our own group
 const pidOf = (dir: string) => { try { return Number(readFileSync(path.join(dir, 'pid'), 'utf8')) || 0; } catch { return 0; } };
 
 function statusOf(id: string): Status | null {
