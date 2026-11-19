@@ -5,7 +5,7 @@
 """Checks tools/to_ifc.py on the app's three samples and on two harder buildings (mixed wall thickness, grids,
 a basement below ground). Free, no network once uv has the packages. From the project folder:
 
-    uv run --quiet tools/check_ifc.py
+    uv run --quiet tools/check_ifc.py [building.json ...]   # no files: the built-in five
 
 Each file must pass IfcOpenShell's validator with the IFC2X3 rules (pytest runs them), and read back as 3D:
 the outside size and height match the numbers, each storey's walls stand on its floor, each wall has its own
@@ -97,5 +97,5 @@ def check(b):
           f"{(hi - lo)[0]:.2f} x {(hi - lo)[1]:.2f} m, {lo[2]:+.2f} to {hi[2]:+.2f} m")
 
 
-for b in samples + [mixed, basement]:
+for b in [json.load(open(p)) for p in sys.argv[1:]] or samples + [mixed, basement]:  # or the buildings named on the command line
     check(b)
