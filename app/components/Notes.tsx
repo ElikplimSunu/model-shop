@@ -79,11 +79,11 @@ function Notes() {
             <p className="hint">Seconds of GPU work once the model is loaded. A cold start adds about two minutes.</p>
           </div>
           <div className="next-up">
-            <h3>Next on the board: buildings</h3>
+            <h3>Buildings</h3>
             <p>
-              The aim is to turn drawings and photos of buildings into detailed building models. That is not
-              tested yet. These models learned mostly from single objects, so whole buildings are the open
-              question for the next round.
+              Buildings have their own page: typed as measurements, or read from a CAD drawing set by Claude, and
+              downloaded for 3D viewers or for Revit. A whole building from a photo has not been tested: these
+              models learned mostly from single objects.
             </p>
             <p style={{ margin: 0 }}>Photos use TRELLIS.2 with Meta&apos;s DINOv3 as its eyes. Descriptions first become a picture that you check (Z-Image Turbo on our GPU, or FLUX on NVIDIA), then take the same photo path. Microsoft recommends this over its own text model, which drops style and material words.</p>
           </div>

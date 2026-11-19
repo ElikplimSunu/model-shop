@@ -8,21 +8,17 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/generate-model
  * 
- * Handles 3D model generation requests.
- * Hybrid approach:
- * - Text-to-3D: Forwards to NVIDIA Trellis API.
- * - Image-to-3D: Uses Hugging Face microsoft/TRELLIS.2 via Gradio client.
+ * A photo to a 3D model (GLB). Each engine in ENGINES runs on its own Modal GPU; TRELLIS.2 falls back to
+ * Hugging Face's microsoft/TRELLIS.2 Space when it has no Modal endpoint. Descriptions reach this route as
+ * photos: the pages make the picture first (app/api/generate-image), so a 'text' request is refused.
  */
 export async function POST(request: NextRequest) {
   try {
-    const apiKey = process.env.NVIDIA_API_KEY;
-    const hfToken = process.env.HF_TOKEN;
-    
     // Parse and validate request body
     let body: GenerateModelRequest;
     try {
       body = await request.json();
-    } catch (error) {
+    } catch {
       return NextResponse.json<GenerateModelResponse>(
         {
           success: false,
@@ -46,121 +42,6 @@ export async function POST(request: NextRequest) {
           },
         },
         { status: 400 }
-      );
-    }
-
-    // --- CASE: TEXT-TO-3D (NVIDIA NIM) ---
-    if (body.type === 'text') {
-      // Own TRELLIS text model on Modal (trellis1_modal.py) when configured; NVIDIA otherwise.
-      const modalTextUrl = process.env.MODAL_TEXT_URL;
-      if (modalTextUrl && body.data.trim()) {
-        console.log('Sending Text-to-3D request to Modal TRELLIS...');
-        const modalResponse = await fetch(modalTextUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${process.env.MODAL_TRELLIS_KEY}`,
-            'Content-Type': 'text/plain; charset=utf-8',
-          },
-          body: body.data.trim(),
-        });
-        if (!modalResponse.ok) {
-          const detail = await modalResponse.text().catch(() => '');
-          return NextResponse.json<GenerateModelResponse>(
-            {
-              success: false,
-              error: { code: 'API_ERROR', message: `Modal TRELLIS text failed with status ${modalResponse.status}: ${detail.slice(0, 200)}` },
-            },
-            { status: 502 }
-          );
-        }
-        return NextResponse.json<GenerateModelResponse>({
-          success: true,
-          model: { data: Buffer.from(await modalResponse.arrayBuffer()).toString('base64'), format: 'glb' },
-        });
-      }
-
-      if (!apiKey || apiKey === 'your_nvidia_api_key_here') {
-        return NextResponse.json<GenerateModelResponse>(
-          {
-            success: false,
-            error: {
-              code: 'CONFIGURATION_ERROR',
-              message: 'NVIDIA API key is not configured for Text-to-3D.',
-            },
-          },
-          { status: 500 }
-        );
-      }
-
-      if (!body.data.trim()) {
-        return NextResponse.json<GenerateModelResponse>(
-          {
-            success: false,
-            error: {
-              code: 'EMPTY_INPUT',
-              message: 'Text prompt cannot be empty',
-            },
-          },
-          { status: 400 }
-        );
-      }
-
-      const trellisRequest = {
-        prompt: body.data,
-        mode: 'text',
-        output_format: 'glb',
-        slat_cfg_scale: 3,
-        ss_cfg_scale: 7.5,
-        slat_sampling_steps: 25,
-        ss_sampling_steps: 25,
-        seed: 0,
-      };
-
-      console.log('Sending Text-to-3D request to NVIDIA Trellis API...');
-      
-      const trellisResponse = await fetch(
-        'https://ai.api.nvidia.com/v1/genai/microsoft/trellis',
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify(trellisRequest),
-        }
-      );
-
-      if (!trellisResponse.ok) {
-        const errorData = await trellisResponse.json().catch(() => ({}));
-        return NextResponse.json<GenerateModelResponse>(
-          {
-            success: false,
-            error: {
-              code: 'API_ERROR',
-              message: errorData.error?.message || `NVIDIA API request failed with status ${trellisResponse.status}`,
-            },
-          },
-          { status: trellisResponse.status }
-        );
-      }
-
-      const responseData = await trellisResponse.json();
-      const modelData = responseData.artifacts?.[0]?.base64 || responseData.model?.data;
-
-      if (modelData) {
-        return NextResponse.json<GenerateModelResponse>({
-          success: true,
-          model: { data: modelData, format: 'glb' },
-        });
-      }
-
-      return NextResponse.json<GenerateModelResponse>(
-        {
-          success: false,
-          error: { code: 'INVALID_RESPONSE', message: 'NVIDIA API did not contain model data' },
-        },
-        { status: 500 }
       );
     }
 
@@ -295,7 +176,8 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
 
-  } catch (err: any) {
+  } catch (thrown: unknown) {
+    const err = thrown as { message?: string; title?: string; type?: string; stage?: string } | string | null;
     console.error('Unexpected error in generate-model route:', err);
     
     let message = 'An unexpected error occurred while processing your request';
@@ -304,7 +186,7 @@ export async function POST(request: NextRequest) {
     // Safely extract message from different error formats (standard Error, Gradio status object, etc.)
     if (typeof err === 'string') {
       message = err;
-    } else if (err && typeof err === 'object') {
+    } else if (err) {
       message = err.message || err.title || message;
       
       // Handle ZeroGPU quota specifically (match regardless of exact wording)

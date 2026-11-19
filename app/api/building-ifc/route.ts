@@ -34,7 +34,7 @@ export async function POST(req: Request) {
     });
   } catch (e) {
     const err = e as NodeJS.ErrnoException & { killed?: boolean; stderr?: string };
-    const why = err.code === 'ENOENT' ? 'could not start: is uv installed (brew install uv)?'
+    const why = err.code === 'ENOENT' ? 'could not start: is uv installed (see docs.astral.sh/uv)?'
       : err.killed ? 'took over 2 minutes and was stopped.'
       : `failed: ${(err.stderr ?? '').trim().split('\n').pop() || err.message}`;
     return Response.json({ error: `The IFC writer ${why}` }, { status: 500 });

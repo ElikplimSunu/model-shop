@@ -106,7 +106,7 @@ export async function POST(request: Request) {
   });
   child.on('error', () => { /* a missing uv: without this listener the error would take the server down; reported below */ });
   if (!child.pid) {
-    writeFileSync(path.join(dir, 'status.json'), JSON.stringify({ done: true, error: 'Could not start the reader: is uv installed (brew install uv)?', log: [], floors: [], cost: 0 }));
+    writeFileSync(path.join(dir, 'status.json'), JSON.stringify({ done: true, error: 'Could not start the reader: is uv installed (see docs.astral.sh/uv)?', log: [], floors: [], cost: 0 }));
     return Response.json({ id: newId });
   }
   writeFileSync(path.join(dir, 'pid'), String(child.pid));
