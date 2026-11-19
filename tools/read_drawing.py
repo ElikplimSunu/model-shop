@@ -303,7 +303,7 @@ WALLS = """
 What to produce (JSON, metres):
 - wallThickness: the usual outside wall thickness, read from the drawing.
 - outline: the exterior wall CENTRELINES of the main enclosed block, placed so the OUTER face is where the drawing has it (centreline = outer face moved inward by half the wall thickness). The outer face of a window wall is the outer edge of the columns, not the window line. A closed loop is implied.
-- walls: every interior wall and partition drawn as a wall, including stair and lift shaft walls and toilet and office partitions. Not furniture, desks, cubicle screens or cupboards. Each wall is [start, end, thickness]: start and end on its centreline, thickness in metres between its two drawn faces (use a written dimension where there is one).
+- walls: every interior wall and partition drawn as a wall, including stair and lift shaft walls and toilet and office partitions. Not furniture, desks, cubicle screens or cupboards. Each wall is [start, end, thickness]: start and end on its centreline, thickness in metres between its two drawn faces. Measure each wall's thickness on its own: the gap in px between its two face lines, divided by the px per metre above. Use a written dimension where there is one; do not assume a standard thickness.
 - openings: every door (kind "door", height 2.1, no sill) and every window or glazed panel in the outside walls, on all sides (kind "window"; sill 0.9 and height 1.5 unless the drawing gives them). Use the written figures and the door and window tags for widths and positions where they exist; scale from the picture otherwise.
 - Leave out the escape stair outside the building, balconies, ramps, canopies and anything else outside the main block.
 
