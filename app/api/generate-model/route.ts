@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     let body: GenerateModelRequest;
     try {
       body = await request.json();
-    } catch (error) {
+    } catch {
       return NextResponse.json<GenerateModelResponse>(
         {
           success: false,
