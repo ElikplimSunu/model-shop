@@ -62,7 +62,7 @@ export default function Buildings() {
                 );
               })}
             </dl>
-            <p className="hint">Area is measured inside the wall centrelines.</p>
+            <p className="hint">Area is measured inside the wall centrelines. The .ifc download is for Revit: storeys, walls with their thickness, doors, windows, floors, roof and grid lines (both ways). It leaves out furniture, stairs, the parapet, the site and colours.</p>
           </div>
         </aside>
 
@@ -78,8 +78,8 @@ export default function Buildings() {
               }}
               aria-label="The building as numbers" aria-describedby="spec-help" />
             <p id="spec-help" className="hint">
-              <b>outline</b>: wall centrelines, corner by corner. <b>walls</b>: inside walls. <b>openings</b>: wall number (outline sides from 0, then inside walls),
-              distance along it, width, height, and sill for windows.
+              <b>outline</b>: wall centrelines, corner by corner. <b>walls</b>: inside walls, each with an optional third number for its own thickness. <b>openings</b>: wall number (outline sides from 0, then inside walls),
+              distance along it, width, height, and sill for windows. <b>grids</b> (optional): grid lines, like {'{ "name": "A", "x": 0 }'}.
             </p>
             {issues.length > 0 && (
               <div className="err" role="alert" style={{ marginTop: 12 }}>

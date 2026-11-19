@@ -26,7 +26,7 @@ export type Level = {
   name: string;
   height: number; // floor to ceiling
   outline: Point[]; // exterior wall centrelines, as a closed loop
-  walls?: [Point, Point][]; // interior walls, centrelines
+  walls?: [Point, Point, number?][]; // interior walls, centrelines; an optional third number is that wall's own thickness
   openings?: Opening[];
   fixtures?: Fixture[];
 };
@@ -40,6 +40,7 @@ export type Building = {
   // each later one covers only its outline: a sunken yard, a raised terrace. Default: just under the ground-floor slab.
   site?: { level: number; outline?: Point[] }[];
   colors?: { outside?: string; inside?: string; frame?: string; glass?: string }; // CSS colours, when the drawings name the materials
+  grids?: { name: string; x?: number; y?: number }[]; // structural grid lines: x for a line up the plan at that x, y for one across it
 };
 
 // Three.js space: x = plan x, y = up, z = -plan y (so north stays up the screen from above).
@@ -73,14 +74,14 @@ const SHAPES: Record<string, (w: number, d: number, f: Fixture) => Part[]> = {
 };
 SHAPES.sofa = SHAPES.armchair;
 
-export type Wall = { from: Point; to: Point; length: number; exterior: boolean };
+export type Wall = { from: Point; to: Point; length: number; exterior: boolean; thickness?: number }; // no thickness: the building's
 
 const len = ([ax, ay]: Point, [bx, by]: Point) => Math.hypot(bx - ax, by - ay);
 
 export function wallsOf(level: Level): Wall[] {
   const n = level.outline.length;
   const outer = level.outline.map((p, i) => ({ from: p, to: level.outline[(i + 1) % n], exterior: true }));
-  const inner = (level.walls ?? []).map(([a, b]) => ({ from: a, to: b, exterior: false }));
+  const inner = (level.walls ?? []).map(([a, b, t]) => ({ from: a, to: b, exterior: false, ...(t !== undefined && { thickness: t }) }));
   return [...outer, ...inner].map((w) => ({ ...w, length: len(w.from, w.to) }));
 }
 
@@ -108,14 +109,21 @@ export const area = (pts: Point[]) =>
 export function problems(b: Building): string[] {
   const out: string[] = [];
   if (!(b.wallThickness > 0)) out.push('wallThickness must be a positive number of metres.');
+  if (b.grids !== undefined && !Array.isArray(b.grids)) out.push('grids must be a list of grid lines.');
+  else b.grids?.forEach((g, i) => {
+    if (!g || typeof g.name !== 'string' || !g.name || Number.isFinite(g.x) === Number.isFinite(g.y)) out.push(`grid line ${i + 1}: needs a name and exactly one of x or y, in metres.`);
+  });
   if (!b.levels?.length) out.push('Add at least one level.');
   b.site?.slice(1).forEach((a, i) => { if ((a.outline?.length ?? 0) < 3) out.push(`site area ${i + 2} needs an outline of at least 3 corners.`); });
   b.levels?.forEach((lv, li) => {
     const where = `Level ${li + 1} (${lv.name})`;
     if (!(lv.height > 0)) out.push(`${where}: height must be positive.`);
     if (!(lv.outline?.length >= 3)) return out.push(`${where}: the outline needs at least 3 corners.`);
-    const pts = [...lv.outline, ...(lv.walls ?? []).flat()];
+    const pts = [...lv.outline, ...(lv.walls ?? []).flatMap((w) => (Array.isArray(w) ? w.slice(0, 2) : [w]))];
     if (!pts.every((p) => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite))) return out.push(`${where}: every corner must be [x, y] in metres.`);
+    (lv.walls ?? []).forEach((w, wi) => {
+      if (w.length > 3 || (w.length === 3 && !(Number.isFinite(w[2]) && w[2]! > 0))) out.push(`${where}, inside wall ${wi + 1}: the third number is its thickness, a positive number of metres.`);
+    });
     const walls = wallsOf(lv);
     (lv.openings ?? []).forEach((o, oi) => {
       const w = walls[o.wall];
@@ -143,7 +151,7 @@ export function pieces(b: Building): Piece[] {
   const F = 0.05; // window frame width
   const out: Piece[] = [];
   // A box along wall w: s0 to s1 along its centreline, y0 to y1 above `at` (the floor it stands on).
-  const box = (w: Wall, at: number, s0: number, s1: number, y0: number, y1: number, kind: 'wall' | 'glass' | 'frame' = 'wall', depth = t, roof = false) => {
+  const box = (w: Wall, at: number, s0: number, s1: number, y0: number, y1: number, kind: 'wall' | 'glass' | 'frame' = 'wall', depth = w.thickness ?? t, roof = false) => {
     if (s1 - s0 < 1e-6 || y1 - y0 < 1e-6) return;
     const th = Math.atan2(w.to[1] - w.from[1], w.to[0] - w.from[0]), c = (s0 + s1) / 2;
     out.push({
@@ -156,7 +164,8 @@ export function pieces(b: Building): Piece[] {
     out.push({ kind: 'slab', outline: lv.outline, y: floor - slab, thickness: slab });
     wallsOf(lv).forEach((w, wi) => {
       const holes = (lv.openings ?? []).filter((o) => o.wall === wi).sort((a, z) => a.at - z.at);
-      let cursor = -t / 2;
+      const tw = w.thickness ?? t;
+      let cursor = -tw / 2;
       for (const o of holes) {
         const bottom = o.kind === 'door' || o.sill === undefined ? 0 : o.sill, top = bottom + o.height;
         box(w, floor, cursor, o.at, 0, lv.height);
@@ -173,7 +182,7 @@ export function pieces(b: Building): Piece[] {
         }
         cursor = o.at + o.width;
       }
-      box(w, floor, cursor, w.length + t / 2, 0, lv.height);
+      box(w, floor, cursor, w.length + tw / 2, 0, lv.height);
     });
     for (const f of lv.fixtures ?? []) {
       const r = ((f.rot ?? 0) * Math.PI) / 180, cos = Math.cos(r), sin = Math.sin(r);
@@ -215,7 +224,7 @@ export function grounds(b: Building, half: number) {
 /** JSON with each point, wall and opening kept on one line, so a plan reads as a short list. */
 export const pretty = (b: Building) => JSON.stringify(b, null, 2)
   .replace(/\[\s*(-?[\d.]+),\s*(-?[\d.]+)\s*\]/g, '[$1, $2]')
-  .replace(/\[\s*(\[[^[\]]*\]),\s*(\[[^[\]]*\])\s*\]/g, '[$1, $2]')
+  .replace(/\[\s*(\[[^[\]]*\]),\s*(\[[^[\]]*\])(?:,\s*(-?[\d.e+-]+))?\s*\]/g, (_, a, z, t) => `[${a}, ${z}${t ? `, ${t}` : ''}]`)
   .replace(/\{[^{}[\]]*\}/g, (m) => m.replace(/\s+/g, ' '));
 
 export const SAMPLES: Building[] = [

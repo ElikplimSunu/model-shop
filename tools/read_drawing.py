@@ -341,7 +341,20 @@ def tags(f):
 
 def walls_of(lv):
     o = lv['outline']
-    return [(o[i], o[(i + 1) % len(o)]) for i in range(len(o))] + [tuple(w) for w in lv.get('walls') or []]
+    return [(o[i], o[(i + 1) % len(o)]) for i in range(len(o))] + [tuple(w[:2]) for w in lv.get('walls') or []]  # a third number is the wall's thickness
+
+
+def grid_lines(floors, shared):
+    """The grid in the building's frame (metres; x = 0 on line LX, y = 0 on line LY), for Revit users who set out from it.
+    Floors on one origin and one scale pool their lines, the median per name; otherwise the first floor's grid alone."""
+    xs, ys = {}, {}
+    for f in floors if shared else floors[:1]:
+        for name, x in f['gx'].items():
+            xs.setdefault(name, []).append((x - f['X0']) / f['ppm'])
+        for name, y in f['gy'].items():
+            ys.setdefault(name, []).append((f['Y0'] - y) / f['ppm'])
+    line = lambda axis, d: [{'name': n, axis: round(v, 3)} for n, v in sorted(((n, statistics.median(v)) for n, v in d.items()), key=lambda i: i[1])]
+    return line('x', xs) + line('y', ys)
 
 
 def num(v):
@@ -628,7 +641,8 @@ def run(job, a):
         h = round(max(2.0, f['storey'] - slab), 2)
         lv['openings'] = [{**o, 'height': round(min(o['height'], h - o.get('sill', 0)), 3)} for o in lv['openings'] if h - o.get('sill', 0) > 0.3]
         levels.append({'name': f['name'], 'height': h, **lv})
-    building = {'name': project or 'Building from a drawing', 'wallThickness': round(thick, 2), 'slab': slab, 'levels': levels}
+    building = {'name': project or 'Building from a drawing', 'wallThickness': round(thick, 2), 'slab': slab, 'levels': levels,
+                'grids': grid_lines([floors[j] for j in chosen], lx is not None and ly is not None and not job.s.get('warning'))}
     if floors[chosen[0]]['level'] < 0:
         building['base'] = floors[chosen[0]]['level']
     (job.dir / 'building.json').write_text(json.dumps(building))

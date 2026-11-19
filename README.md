@@ -49,9 +49,10 @@ The app has three pages, linked from the header. Switching pages never drops a m
 
 ### Buildings (`/buildings`)
 
-- **A building typed as measurements.** You describe the building as numbers in metres, in JSON (a plain text format for structured data): the outline of each floor, the inside walls, the doors and windows, the floor heights. Code in `lib/building.ts` turns those numbers into exact walls, glass, window frames and floor slabs. No AI is involved here, so nothing is guessed. Three samples are built in: a studio, a two-bedroom bungalow and a two-storey house.
+- **A building typed as measurements.** You describe the building as numbers in metres, in JSON (a plain text format for structured data): the outline of each floor, the inside walls (each may give its own thickness), the doors and windows, the floor heights, and optionally the grid lines. Code in `lib/building.ts` turns those numbers into exact walls, glass, window frames and floor slabs. No AI is involved here, so nothing is guessed. Three samples are built in: a studio, a two-bedroom bungalow and a two-storey house.
 - **Mistakes in plain words.** If the numbers do not make a valid building (a window longer than its wall, say), the page lists what to fix and keeps showing the last version that worked.
-- **The 3D view.** True scale, the length of each outside wall labelled on the ground floor, the outside width, depth and height, a late-afternoon sun with shadows, lift the roof, show fewer floors, and download the building as `.glb`. A per-floor summary gives each floor's area, walls, doors, windows and height.
+- **The 3D view.** True scale, the length of each outside wall labelled on the ground floor, the outside width, depth and height, a late-afternoon sun with shadows, lift the roof, show fewer floors, and download the building as `.glb`, or as `.ifc` for Revit. A per-floor summary gives each floor's area, walls, doors, windows and height.
+- **For Revit.** The `.ifc` download is IFC2X3, the open building-model format Revit links and opens. It carries what a Revit user sets out from: storeys at their levels, walls along their centrelines with a wall type per thickness, doors and windows sitting in holes in their walls, floor slabs, the flat roof and the grid lines. It leaves out furniture, stairs, the parapet, the site and colours. `tools/to_ifc.py` writes it with IfcOpenShell, on this machine, for free. Tested in Revit only once: an earlier version of the sample bungalow (one wall type, no grid lines) was linked into Revit 2026 by a civil engineer, and nobody looked closely at the result. Grid lines, levels and wall types have not been seen in Revit yet, and neither has opening the file as real Revit walls.
 - **From a drawing.** Upload a CAD drawing set as a PDF (up to 200 MB). Claude Opus 5.5 reads it floor by floor into the same numbers, and the building appears in the viewer. You choose which floors to read, with a price shown before anything costly starts. Each floor gets a check picture: the reading drawn in colour over the original plan (blue walls, orange doors, purple windows, red furniture), so you can see at a glance what was read right and what was missed.
 
 ### How it works (`/how-it-works`)
@@ -121,7 +122,7 @@ The reader is one Python script, `tools/read_drawing.py`. The app starts it in t
 3. **Wait for you.** The page lists the floors found, with an estimated price, and waits for you to choose. Nothing costly starts unseen.
 4. **Walls, doors and windows.** One Claude reading per floor, given the floor's picture plus the measured grid and scale.
 5. **Furniture and fittings.** A second Claude reading per floor, given the walls already read, the drawing's tags and the legend pages.
-6. **Stack and check.** The floors are stacked by their levels into one building, and each reading is drawn over its plan as a check picture.
+6. **Stack and check.** The floors are stacked by their levels into one building, with the grid lines measured in step 2, and each reading is drawn over its plan as a check picture.
 
 Steps 4 and 5 run on four floors at a time.
 
@@ -318,7 +319,13 @@ It needs `ANTHROPIC_API_KEY` in the environment and writes `status.json`, `build
 pnpm exec vitest run lib
 ```
 
-This runs the tests for `lib/building.ts`: they measure the built pieces (wall lengths, door holes, window sills and frames, corners, slabs, basements, parapets, ground levels, fittings, floor areas) against the numbers they came from, and check the plain-word error messages. All 15 passed on 17 Nov 2026. They need no network and no keys.
+This runs the tests for `lib/building.ts`: they measure the built pieces (wall lengths, door holes, window sills and frames, corners, slabs, basements, parapets, ground levels, fittings, floor areas) against the numbers they came from, and check the plain-word error messages, inside-wall thicknesses and grid lines. All 17 passed on 19 Nov 2026. They need no network and no keys.
+
+```bash
+uv run --quiet tools/check_ifc.py
+```
+
+This checks the `.ifc` writer on the three samples and two harder buildings (thin inside walls with grid lines; three storeys over a basement). Each file must pass IfcOpenShell's validator with the IFC2X3 rules, and read back as 3D at the right size and height, with every wall on its floor at its own thickness, every door and window inside its own hole, and each grid line at its place with its name. All five passed on 19 Nov 2026. Give it building files to check those instead.
 
 ```bash
 pnpm exec vitest run
@@ -350,9 +357,10 @@ app/
   api/generate-image/route.ts   Description to picture (Z-Image Turbo or FLUX.1 [dev])
   api/generate-model/route.ts   Picture to GLB (Modal, or the Hugging Face Space fallback)
   api/read-drawing/route.ts     Upload a PDF, start the reader, report progress, serve check pictures
+  api/building-ifc/route.ts     Building numbers to an .ifc file, with tools/to_ifc.py
   components/InputHandler.tsx   Photo or description input, picture model, 3D model, Draft or High
   components/ModelViewer.tsx    3D view for objects (React Three Fiber)
-  components/BuildingViewer.tsx 3D view for buildings: true scale, labels, sun, GLB export
+  components/BuildingViewer.tsx 3D view for buildings: true scale, labels, sun, GLB and IFC downloads
   components/DrawingUpload.tsx  The From a drawing panel: upload, choose floors, progress, check pictures
   components/Notes.tsx          The How it works sheet
   icon.svg, apple-icon.png      Browser tab and home screen icons
@@ -363,6 +371,8 @@ lib/
   cursor-swarm.js               Animation library that draws the How it works sheet (vendored: copied in, not installed)
 types/3d-model.ts               Request types, and the lists of 3D models and picture models
 tools/read_drawing.py           The drawing reader (Python, run with uv)
+tools/to_ifc.py                 A building to IFC2X3 for Revit (IfcOpenShell, run with uv)
+tools/check_ifc.py              Checks to_ifc.py on five buildings: validator rules, sizes, walls, holes, grids
 trellis_modal.py                TRELLIS.2 on Modal, with Draft and High
 trellis1_modal.py               TRELLIS v1 on Modal (and the unused text model)
 hunyuan3d_modal.py              Hunyuan3D-2.1 on Modal

@@ -170,4 +170,28 @@ describe('building from numbers', () => {
     bad.levels[0].openings![0].at = 5.5; // a 0.9 m door starting 5.5 m along a 6 m wall
     expect(problems(bad)[0]).toMatch(/runs past the end of wall 0, which is 6.00 m long/);
   });
+
+  it('gives an inside wall its own thickness when the spec has one, and keeps the building\'s otherwise', () => {
+    // only boxes running up the plan at x = 3: the window in wall 2 is centred on x = 3 too
+    const lv = { ...studio.levels[0], walls: [[[3, 0], [3, 4], 0.1]] as [Point, Point, number][], openings: [{ wall: 4, at: 1, width: 0.8, height: 2.1, kind: 'door' as const }] };
+    const inner = pieces({ ...studio, levels: [lv] }).filter((p): p is Box => p.kind === 'wall' && Math.abs(p.center[0] - 3) < 1e-9 && Math.abs(Math.cos(p.rotY)) < 1e-9);
+    for (const w of inner) near(w.size[2], 0.1); // the inside wall is 0.1 thick, not the studio's 0.2
+    const { lo, hi } = bounds(inner);
+    near(-hi[2], -0.05); near(-lo[2], 4.05); // and runs half its own thickness past each end
+    near(inner.find((w) => w.center[1] > 2.1)!.size[0], 0.8); // the door's hole is still cut, over 0.8 m
+    const plain = pieces({ ...studio, levels: [{ ...lv, walls: [[[3, 0], [3, 4]]] }] }).filter((p): p is Box => p.kind === 'wall' && Math.abs(p.center[0] - 3) < 1e-9 && Math.abs(Math.cos(p.rotY)) < 1e-9);
+    for (const w of plain) near(w.size[2], 0.2);
+    expect(problems({ ...studio, levels: [lv] })).toEqual([]);
+    expect(problems({ ...studio, levels: [{ ...lv, walls: [[[3, 0], [3, 4], -1]] }] })[0]).toMatch(/inside wall 1: the third number is its thickness/);
+  });
+
+  it('accepts grid lines with a name and one of x or y, and keeps them through formatting', () => {
+    const b = { ...SAMPLES[1], grids: [{ name: 'A', x: 0 }, { name: 'B', x: 6 }, { name: '1', y: 0 }, { name: '2', y: 8 }],
+      levels: [{ ...SAMPLES[1].levels[0], walls: [[[6, 0], [6, 8], 0.115], [[6, 4], [12, 4]]] as [Point, Point, number?][] }] };
+    expect(problems(b)).toEqual([]);
+    expect(JSON.parse(pretty(b))).toEqual(b);
+    expect(pretty(b)).toContain('[[6, 0], [6, 8], 0.115]'); // a wall with its thickness stays on one line
+    expect(problems({ ...b, grids: [{ name: 'C', x: 1, y: 2 }] })[0]).toMatch(/grid line 1: needs a name and exactly one of x or y/);
+    expect(problems({ ...b, grids: [{ name: '', y: 2 }] })[0]).toMatch(/grid line 1/);
+  });
 });
