@@ -62,7 +62,7 @@ class Job:
         worst = tokens_in * PRICE_IN + MAX_OUT * PRICE_OUT
         with self.lock:
             if self.s['cost'] + self.reserved + worst > self.cap:
-                raise Stop(f"the ${self.cap:.0f} cap for this drawing would be passed (spent ${self.s['cost']:.2f})")
+                raise Stop(f"the ${self.cap:.2f} cap for this drawing would be passed (spent ${self.s['cost']:.2f})")
             self.reserved += worst
         return worst
 
@@ -303,7 +303,7 @@ WALLS = """
 What to produce (JSON, metres):
 - wallThickness: the usual outside wall thickness, read from the drawing.
 - outline: the exterior wall CENTRELINES of the main enclosed block, placed so the OUTER face is where the drawing has it (centreline = outer face moved inward by half the wall thickness). The outer face of a window wall is the outer edge of the columns, not the window line. A closed loop is implied.
-- walls: every interior wall and partition drawn as a wall, including stair and lift shaft walls and toilet and office partitions. Not furniture, desks, cubicle screens or cupboards.
+- walls: every interior wall and partition drawn as a wall, including stair and lift shaft walls and toilet and office partitions. Not furniture, desks, cubicle screens or cupboards. Each wall is [start, end, thickness]: start and end on its centreline, thickness in metres between its two drawn faces (use a written dimension where there is one).
 - openings: every door (kind "door", height 2.1, no sill) and every window or glazed panel in the outside walls, on all sides (kind "window"; sill 0.9 and height 1.5 unless the drawing gives them). Use the written figures and the door and window tags for widths and positions where they exist; scale from the picture otherwise.
 - Leave out the escape stair outside the building, balconies, ramps, canopies and anything else outside the main block.
 
@@ -314,7 +314,7 @@ type Opening = { wall: number; at: number; width: number; height: number; sill?:
 // at: distance from that wall's START point to the near edge of the opening, along the centreline
 Rules: every opening has at >= 0 and at + width <= its wall's centreline length; at least 3 outline corners. A guess presented as a reading is worse than a gap.
 
-Reply with only the JSON in one ```json block: {"wallThickness": number, "outline": Point[], "walls": [Point, Point][], "openings": Opening[]}"""
+Reply with only the JSON in one ```json block: {"wallThickness": number, "outline": Point[], "walls": [Point, Point, number][], "openings": Opening[]}"""
 
 FITTINGS = """
 The furniture and fittings: every piece drawn on this plan, as a JSON array of items:
@@ -366,7 +366,9 @@ def clean_walls(d, note):
     outline = [p for p in d['outline'] if pt(p)]
     if len(outline) < 3:
         raise ValueError('the outline needs at least 3 corners')
-    lv = {'outline': outline, 'walls': [w for w in d.get('walls') or [] if isinstance(w, list) and len(w) == 2 and pt(w[0]) and pt(w[1])], 'openings': []}
+    # an inside wall's third number is its thickness; one outside 5 cm to 60 cm is dropped and the wall keeps the building's
+    wall = lambda w: w[:2] + [round(w[2], 3)] if len(w) == 3 and num(w[2]) and 0.05 <= w[2] <= 0.6 else w[:2]
+    lv = {'outline': outline, 'walls': [wall(w) for w in d.get('walls') or [] if isinstance(w, list) and len(w) in (2, 3) and pt(w[0]) and pt(w[1])], 'openings': []}
     segs = walls_of(lv)
     dropped = 0
     for op in d.get('openings') or []:
