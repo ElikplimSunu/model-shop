@@ -11,7 +11,7 @@ export type GenerationInput =
 export const ENGINES = {
   trellis2: { name: 'TRELLIS.2', reads: 'Meta DINOv3', env: 'MODAL_TRELLIS_URL' },
   trellis1: { name: 'TRELLIS v1', reads: 'DINOv2', env: 'MODAL_TRELLIS1_URL' },
-  hunyuan: { name: 'Hunyuan3D-2.1', reads: 'Meta DINOv2 giant', env: 'MODAL_HUNYUAN_URL' },
+  hunyuan: { name: 'Hunyuan3D-2.1', reads: 'Meta DINOv2', env: 'MODAL_HUNYUAN_URL' },
 } as const;
 export type Engine = keyof typeof ENGINES;
 
