@@ -62,7 +62,7 @@ export default function Buildings() {
                 );
               })}
             </dl>
-            <p className="hint">Area is measured inside the wall centrelines.</p>
+            <p className="hint">Area is measured inside the wall centrelines. The .ifc download is for Revit: storeys, walls with their thickness, doors, windows, floors, roof and grid lines (both ways). It leaves out furniture, stairs, the parapet, the site and colours.</p>
           </div>
         </aside>
 

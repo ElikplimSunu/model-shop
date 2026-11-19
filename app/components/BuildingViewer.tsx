@@ -154,6 +154,7 @@ export default function BuildingViewer({ b }: { b: Building }) {
   const scene = useRef<THREE.Scene>(null);
   const [roof, setRoof] = useState(true);
   const [hidden, setHidden] = useState(0); // top floors hidden; counting from the top keeps every floor shown when a taller building is pasted
+  const [ifc, setIfc] = useState<string | null>(null); // the IFC download: 'busy', or why it failed
   const shownLevels = Math.max(1, b.levels.length - hidden);
   const shown = useMemo(() => ({ ...b, levels: b.levels.slice(0, shownLevels) }), [b, shownLevels]);
   const parts = useMemo(() => pieces(shown).filter((p) => roof || !p.roof), [shown, roof]);
@@ -191,16 +192,30 @@ export default function BuildingViewer({ b }: { b: Building }) {
     return { pos: [mx, (b.base ?? 0) + 0.02, -my] as [number, number, number], text: `${w.length.toFixed(2)} m` };
   });
 
+  const fileBase = b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'building';
+  const save = (blob: Blob, ext: string) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${fileBase}.${ext}`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
   const download = () => {
     const building = scene.current?.getObjectByName(b.name);
     if (!building) return;
-    new GLTFExporter().parse(building, (out) => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([out as ArrayBuffer], { type: 'model/gltf-binary' }));
-      a.download = `${b.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'building'}.glb`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    }, () => {}, { binary: true });
+    new GLTFExporter().parse(building, (out) => save(new Blob([out as ArrayBuffer], { type: 'model/gltf-binary' }), 'glb'), () => {}, { binary: true });
+  };
+  // the IFC is written on the server from the numbers (tools/to_ifc.py), not from the 3D scene
+  const downloadIfc = async () => {
+    setIfc('busy');
+    try {
+      const res = await fetch('/api/building-ifc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `The IFC writer answered ${res.status}.`);
+      save(await res.blob(), 'ifc');
+      setIfc(null);
+    } catch (e) {
+      setIfc(e instanceof Error ? e.message : 'The IFC could not be made.');
+    }
   };
 
   return (
@@ -233,6 +248,7 @@ export default function BuildingViewer({ b }: { b: Building }) {
       <div className="readout num">
         <span className="dims"><span>W</span>{e.width.toFixed(2)} <span>D</span>{e.depth.toFixed(2)} <span>H</span>{(e.height - e.ground).toFixed(2)} <span>m outside, ground to roof top</span></span>
         <span>{under > 0 && `lowest floor: ${under.toFixed(2)} m below ground · `}grid: 1 m squares, heavier line every 5 m</span>
+        {ifc && ifc !== 'busy' && <span role="alert">{ifc}</span>}
       </div>
       <div className="tools">
         <button type="button" onClick={() => controls.current?.reset()}>Reset view</button>
@@ -243,6 +259,10 @@ export default function BuildingViewer({ b }: { b: Building }) {
           </button>
         )}
         <button type="button" onClick={download}>Download .glb</button>
+        <button type="button" onClick={downloadIfc} disabled={ifc === 'busy'}
+          title="For Revit: storeys, walls with their thickness, doors, windows, floors, roof and grid lines. No furniture, stairs, parapet, site or colours.">
+          {ifc === 'busy' ? 'Making .ifc…' : 'Download .ifc'}
+        </button>
       </div>
     </section>
   );
