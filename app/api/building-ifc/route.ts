@@ -8,7 +8,7 @@ import { problems, type Building } from '@/lib/building';
 // POST  body: the building as JSON  ->  the .ifc file, or { error } in plain words
 export const dynamic = 'force-dynamic';
 
-const MAX_BYTES = 5 * 1024 * 1024; // the 12-floor drawing reading is about 0.1 MB
+const MAX_BYTES = 5 * 1024 * 1024; // a 12-floor drawing reading is 90 KB
 const SCRIPT = path.join(process.cwd(), 'tools', 'to_ifc.py');
 
 export async function POST(req: Request) {

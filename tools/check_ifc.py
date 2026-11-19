@@ -22,6 +22,7 @@ import numpy as np
 import ifcopenshell
 import ifcopenshell.geom
 import ifcopenshell.util.element as ue
+import ifcopenshell.util.placement as up
 
 import to_ifc
 
@@ -32,7 +33,7 @@ bungalow, house = samples[1], samples[2]
 mixed = {**bungalow, 'name': 'Bungalow, thin inside walls, grids',
          'levels': [{**bungalow['levels'][0], 'walls': [[[6, 0], [6, 8], 0.115], [[6, 4], [12, 4], 0.15]]}],
          'grids': [{'name': 'A', 'x': 0}, {'name': 'B', 'x': 6}, {'name': 'C', 'x': 12}, {'name': '1', 'y': 0}, {'name': '2', 'y': 8}]}
-basement = {**house, 'name': 'House over a basement', 'base': -3.2, 'grids': [{'name': 'A', 'x': 0}, {'name': '1', 'y': 0}],
+basement = {**house, 'name': 'House over a basement', 'base': -3.2, 'grids': [{'name': 'A', 'x': 0.5}, {'name': 'B', 'x': 8.5, 'y': None}, {'name': '1', 'y': 6.5}],
             'levels': [{**house['levels'][0], 'name': 'Basement'}] + house['levels']}
 
 settings = ifcopenshell.geom.settings()
@@ -87,10 +88,20 @@ def check(b):
         (a0, a1), (h0, h1) = box(el), box(el.FillsVoids[0].RelatingOpeningElement)
         assert np.all(a0 >= h0 - 1e-6) and np.all(a1 <= h1 + 1e-6), el.GlobalId
 
+    # each grid line at its x or y, in world coordinates, on the lowest floor
     grids = b.get('grids') or []
     tags = sorted(a.AxisTag for a in f.by_type('IfcGridAxis'))
     if any('x' in g for g in grids) and any('y' in g for g in grids):
         assert tags == sorted(g['name'] for g in grids), tags
+        grid = f.by_type('IfcGrid')[0]
+        m = up.get_local_placement(grid.ObjectPlacement)
+        assert abs(m[2, 3] - base) < 1e-9, m[2, 3]
+        want = {g['name']: g for g in grids}
+        for a in f.by_type('IfcGridAxis'):
+            ends = [m @ np.array([*p.Coordinates[:2], 0, 1]) for p in a.AxisCurve.Points]
+            g = want[a.AxisTag]
+            axis = 0 if 'x' in g else 1
+            assert all(abs(e[axis] - g['x' if axis == 0 else 'y']) < 1e-6 for e in ends), (a.AxisTag, ends)
     else:
         assert not tags
     print(f"ok  {b['name']}: {len(b['levels'])} storey(s), {walls} walls in {len(f.by_type('IfcWallType'))} type(s), {len(fills)} doors and windows, {len(tags)} grid lines, "

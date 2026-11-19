@@ -140,7 +140,8 @@ def build(b):
 
     # grid lines, on the lowest storey, running 2 m past the building each way
     grids = b.get('grids') or []
-    across, up = [g for g in grids if 'y' in g], [g for g in grids if 'x' in g]
+    num = lambda v: isinstance(v, (int, float)) and math.isfinite(v)  # problems() lets a null stand for the unused one
+    across, up = [g for g in grids if num(g.get('y'))], [g for g in grids if num(g.get('x'))]
     if across and up:  # IFC2X3 needs lines both ways
         pts = [p for lv in b['levels'] for p in lv['outline']] + [(g['x'], 0) for g in up] + [(0, g['y']) for g in across]
         x0, x1 = min(p[0] for p in pts) - 2, max(p[0] for p in pts) + 2
