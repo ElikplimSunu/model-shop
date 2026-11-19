@@ -265,7 +265,6 @@ Create a file named `.env.local` in the project folder. Next.js reads it when th
 | `ANTHROPIC_API_KEY` | Reading drawings | Your Anthropic API key. The server passes it on to the reader script. |
 | `HF_TOKEN` | Optional | A Hugging Face read token, used only by the Hugging Face Space fallback. |
 | `UV_BIN` | Optional | The full path to `uv`, if the server cannot find it on its own. |
-| `MODAL_TEXT_URL` | Not used by the pages | A leftover for the old direct text-to-3D endpoint. Leave it unset. |
 
 A model or picture maker whose variable is missing answers with a message naming that variable; nothing else breaks. A wrong or missing `MODAL_TRELLIS_KEY` shows up as a 401 (not allowed) error from Modal.
 
@@ -331,7 +330,7 @@ This checks the `.ifc` writer on the three samples and two harder buildings (thi
 pnpm exec vitest run
 ```
 
-This runs everything. Three old component test files fail: `app/components/InputHandler.test.tsx`, `app/components/ModelViewer.test.tsx` and `app/components/ModelViewer.performance.test.tsx`. They were written for an earlier interface (they look for props, the inputs a React component takes, and buttons that the components no longer have), not because the app is broken. `app/api/generate-model/route.test.ts` is an empty placeholder. `pnpm test` starts the same runner in watch mode (it reruns the tests whenever a file changes).
+This runs every test file; today the `lib` tests above are the only ones. `pnpm test` starts the same runner in watch mode (it reruns the tests whenever a file changes).
 
 ```bash
 pnpm run lint
@@ -382,8 +381,6 @@ docs/                           Images for this README
 ```
 
 Created while the app runs, and ignored by git: `.drawings/` (each uploaded drawing set, its progress, its building and its check pictures) and `demo/` (output of the command line runs).
-
-Left over from the project's first version, written for the earlier interface: `.kiro/specs/`, `app/components/TASK-*.md` and `app/components/*.manual-test.md`.
 
 ### A building as numbers
 
@@ -456,7 +453,7 @@ All figures were measured on this project, with one or a few runs each; the sing
 - The usual time window is shown for TRELLIS.2 only. Draft and High exist for TRELLIS.2 only.
 - A Z-Image Turbo picture request gives up after 5 minutes, and a FLUX.1 [dev] request after 3. A cold Z-Image Turbo start has taken about 3.5 minutes, which leaves little room.
 - FLUX.1 [dev] is for non-commercial use.
-- The direct text-to-3D code (the `type: 'text'` branch in `app/api/generate-model/route.ts`, `MODAL_TEXT_URL`, and `generate_text` in `trellis1_modal.py`) is a leftover that the pages never call.
+- `generate_text` in `trellis1_modal.py`, the old direct text-to-3D model, is a leftover: the app no longer calls it.
 
 **Buildings**
 
@@ -469,6 +466,7 @@ All figures were measured on this project, with one or a few runs each; the sing
 - The scale comes from dimension numbers written between grid lines. A set that writes its grid dimensions another way gets a warning, and its floors are left unticked.
 - A floor without a level mark is placed between its neighbours: a guess, and the page says so.
 - Readings must be checked against the check pictures. Doors are the weakest part.
+- Inside-wall thickness is read wall by wall. On the scored set (three walls checked by eye per floor) it was right on one floor and 5 cm too thin on the other. Outside walls share one thickness.
 - A building read from drawings is plainer than a hand-typed one: no site, colours or facade (outside face) details. A floor that fails keeps its place, with its neighbour's outline and no inside walls.
 - Accuracy has been scored on two floors of one drawing set. The hand-checked readings were first drafted with Claude's help, which may favour Claude in the comparison with the open models.
 - One reading at a time. If no floors are chosen within 30 minutes, the reading stops.
@@ -477,7 +475,7 @@ All figures were measured on this project, with one or a few runs each; the sing
 
 - One computer only, with no login, accounts or rate limits (see [Security](#security)).
 - Modal CLI 1.7.0 and later refuse the TRELLIS apps' Python 3.10 images.
-- There is no CI, and three old component test files fail (see [Test it](#test-it)).
+- There is no CI. The pages have no automatic tests in the repository; they have been checked in the browser.
 
 ## Credits
 
