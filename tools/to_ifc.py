@@ -90,7 +90,8 @@ def build(b):
             return el
 
         outline = [tuple(p[:2]) for p in lv['outline']]
-        add('IfcSlab', f'{lv["name"]} floor', api.geometry.add_slab_representation(f, context=body, depth=slab, polyline=outline), place(0, 0, floor - slab), 'FLOOR')
+        ring = outline + outline[:1]  # a closed profile ends where it starts, or Revit warns and closes it itself
+        add('IfcSlab', f'{lv["name"]} floor', api.geometry.add_slab_representation(f, context=body, depth=slab, polyline=ring), place(0, 0, floor - slab), 'FLOOR')
 
         n = len(outline)
         walls = [(outline[i], outline[(i + 1) % n], True, t0) for i in range(n)]
@@ -136,9 +137,11 @@ def build(b):
 
         floor += H + slab
         if li == len(b['levels']) - 1:  # the flat roof on the top level, as in the app
-            add('IfcSlab', 'Roof', api.geometry.add_slab_representation(f, context=body, depth=slab, polyline=outline), place(0, 0, floor - slab), 'ROOF')
+            add('IfcSlab', 'Roof', api.geometry.add_slab_representation(f, context=body, depth=slab, polyline=ring), place(0, 0, floor - slab), 'ROOF')
 
-    # grid lines, on the lowest storey, running 2 m past the building each way
+    # grid lines running 2 m past the building each way, repeated on every storey. Revit's IFC importer makes
+    # each grid line only 1.2 m tall, from the storey it sits on, and joins a repeat of the same line into one,
+    # so a grid on every storey gives one line per axis through every floor plan (IFCGridAxis.cs, Autodesk/revit-ifc)
     grids = b.get('grids') or []
     num = lambda v: isinstance(v, (int, float)) and math.isfinite(v)  # problems() lets a null stand for the unused one
     across, up = [g for g in grids if num(g.get('y'))], [g for g in grids if num(g.get('x'))]
@@ -146,14 +149,15 @@ def build(b):
         pts = [p for lv in b['levels'] for p in lv['outline']] + [(g['x'], 0) for g in up] + [(0, g['y']) for g in across]
         x0, x1 = min(p[0] for p in pts) - 2, max(p[0] for p in pts) + 2
         y0, y1 = min(p[1] for p in pts) - 2, max(p[1] for p in pts) + 2
-        z = storeys[0].Elevation
-        grid = api.root.create_entity(f, 'IfcGrid', name='Grid')
-        api.spatial.assign_container(f, products=[grid], relating_structure=storeys[0])
-        api.geometry.edit_object_placement(f, product=grid, matrix=place(0, 0, z))
-        for g in across:
-            api.grid.create_axis_curve(f, p1=np.array((x0, g['y'], z)), p2=np.array((x1, g['y'], z)), grid_axis=api.grid.create_grid_axis(f, grid=grid, axis_tag=g['name'], uvw_axes='UAxes'))
-        for g in up:
-            api.grid.create_axis_curve(f, p1=np.array((g['x'], y0, z)), p2=np.array((g['x'], y1, z)), grid_axis=api.grid.create_grid_axis(f, grid=grid, axis_tag=g['name'], uvw_axes='VAxes'))
+        for storey in storeys:
+            z = storey.Elevation
+            grid = api.root.create_entity(f, 'IfcGrid', name='Grid')
+            api.spatial.assign_container(f, products=[grid], relating_structure=storey)
+            api.geometry.edit_object_placement(f, product=grid, matrix=place(0, 0, z))
+            for g in across:
+                api.grid.create_axis_curve(f, p1=np.array((x0, g['y'], z)), p2=np.array((x1, g['y'], z)), grid_axis=api.grid.create_grid_axis(f, grid=grid, axis_tag=g['name'], uvw_axes='UAxes'))
+            for g in up:
+                api.grid.create_axis_curve(f, p1=np.array((g['x'], y0, z)), p2=np.array((g['x'], y1, z)), grid_axis=api.grid.create_grid_axis(f, grid=grid, axis_tag=g['name'], uvw_axes='VAxes'))
     elif grids:
         print('grid lines run only one way, so they were left out (IFC2X3 needs both)', file=sys.stderr)
 
