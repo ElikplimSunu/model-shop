@@ -10,7 +10,7 @@ a basement below ground). Free, no network once uv has the packages. From the pr
 Each file must pass IfcOpenShell's validator with the IFC2X3 rules (pytest runs them), and read back as 3D:
 the outside size and height match the numbers, each storey's walls stand on its floor, each wall has its own
 thickness in its type, every door and window sits inside its own hole, every slab outline is closed, and the
-grid lines keep their names on every storey.
+grid is written once, on the building, with every line named and in place.
 """
 import json
 import math
@@ -95,26 +95,23 @@ def check(b):
             pts = item.SweptArea.OuterCurve.Points
             assert pts[0].Coordinates == pts[-1].Coordinates, el.Name
 
-    # the same grid lines on every storey (Revit joins them into one line through every floor),
-    # each at its x or y in world coordinates and at its own storey's height
+    # one grid, hung on the building (Revit runs it through every floor; one per storey made repeats named A),
+    # each line at its x or y in world coordinates
     grids = b.get('grids') or []
     tags = []
     if any('x' in g for g in grids) and any('y' in g for g in grids):
         want = {g['name']: g for g in grids}
         tags = sorted(want)
         found = f.by_type('IfcGrid')
-        assert sorted(g.ContainedInStructure[0].RelatingStructure.Name for g in found) == sorted(lv['name'] for lv in b['levels'])
-        for grid in found:
-            storey = grid.ContainedInStructure[0].RelatingStructure
-            m = up.get_local_placement(grid.ObjectPlacement)
-            assert abs(m[2, 3] - storey.Elevation) < 1e-9, (storey.Name, m[2, 3])
-            axes = list(grid.UAxes) + list(grid.VAxes)
-            assert sorted(a.AxisTag for a in axes) == tags, (storey.Name, axes)
-            for a in axes:
-                ends = [m @ np.array([*p.Coordinates[:2], 0, 1]) for p in a.AxisCurve.Points]
-                g = want[a.AxisTag]
-                axis = 0 if 'x' in g else 1
-                assert all(abs(e[axis] - g['x' if axis == 0 else 'y']) < 1e-6 for e in ends), (a.AxisTag, ends)
+        assert len(found) == 1 and found[0].ContainedInStructure[0].RelatingStructure.is_a('IfcBuilding'), found
+        m = up.get_local_placement(found[0].ObjectPlacement)
+        axes = list(found[0].UAxes) + list(found[0].VAxes)
+        assert sorted(a.AxisTag for a in axes) == tags, axes
+        for a in axes:
+            ends = [m @ np.array([*p.Coordinates[:2], 0, 1]) for p in a.AxisCurve.Points]
+            g = want[a.AxisTag]
+            axis = 0 if 'x' in g else 1
+            assert all(abs(e[axis] - g['x' if axis == 0 else 'y']) < 1e-6 for e in ends), (a.AxisTag, ends)
     else:
         assert not f.by_type('IfcGridAxis')
     print(f"ok  {b['name']}: {len(b['levels'])} storey(s), {walls} walls in {len(f.by_type('IfcWallType'))} type(s), {len(fills)} doors and windows, {len(tags)} grid lines, "
