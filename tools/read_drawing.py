@@ -8,7 +8,8 @@
 
 The steps: 1 sort the pages (Claude looks at every sheet), 2 find each floor (grid lines and scale
 measured from the PDF's own text, never the written scale), 3 walls, doors and windows and 4 furniture (one Claude
-reading each per floor), 5 stack the floors by their level marks, 6 draw every reading over its plan for checking.
+reading each per floor, then the walls measured from the drawing's own lines, free), 5 stack the floors by their
+level marks, 6 draw every reading over its plan for checking.
 After step 2 it waits for the go (go.json in the job dir: which floors to read), so nothing costly starts unseen.
 Dev flags: --boxes <json> skips step 1 with known plan boxes; --only <names>; --stop-after sort|find; --yes; --cap <dollars>.
 The API key comes from ANTHROPIC_API_KEY (the app passes it on from .env.local).
@@ -16,6 +17,8 @@ The API key comes from ANTHROPIC_API_KEY (the app passes it on from .env.local).
 import argparse, base64, faulthandler, io, json, math, os, re, signal, statistics, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+import pdf_walls  # tools/pdf_walls.py, beside this script
 
 MODEL, PRICE_IN, PRICE_OUT = 'claude-opus-5-5', 4 / 1e6, 20 / 1e6  # dollars per token; thinking is billed as output
 MAX_OUT, SIDE, PER_FLOOR = 32000, 2576, 0.50  # output cap per call; picture side (Claude's full resolution); $ per floor (measured 17 Nov: two floors, walls and furniture, $0.98 and $1.02)
@@ -428,6 +431,14 @@ def read_floor(job, client, pdf, i, f, legend):
              + FITTINGS.replace('FLOOR_TO_FLOOR', f"{f.get('storey', 3.0):.2f}"))
     items = ask(job, client, [picture(im), {'type': 'text', 'text': brief}], lambda d: d if isinstance(d, list) else d['items'], 16000)
     lv['fixtures'] = clean_fittings(items if isinstance(items, list) else items['items'], note)
+    try:  # the drawing's own lines: measured wall positions and thickness, plus walls Claude missed (free)
+        with PDFIUM:  # one floor at a time: pdfplumber reads the shared file too
+            segs = pdf_walls.strokes(pdf.pages[f['page'] - 1], f['box'], f['X0'], f['Y0'], f['ppm'])
+        merged, n = pdf_walls.merge_into(lv, pdf_walls.pair_walls(segs), segs)
+        lv = {**clean_walls({**merged, 'wallThickness': thick}, note)[0], 'fixtures': lv['fixtures']}
+        note(f"{n['pdf_walls']} walls measured from the drawing's lines, {n['claude_walls_kept']} of Claude's kept as read")
+    except Exception as e:  # never lose a paid reading to this step
+        note(f"walls not measured from the drawing's lines ({type(e).__name__}: {e})")
     check(f, im, lv, job.dir / f"check-{i}.jpg")
     job.floor(i, state='done', note=f"{len(lv['walls'])} inside walls, {sum(o['kind'] == 'door' for o in lv['openings'])} doors, "
                                     f"{sum(o['kind'] == 'window' for o in lv['openings'])} windows, {len(lv['fixtures'])} fittings")
